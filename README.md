@@ -247,22 +247,6 @@ The engine supports multi-turn context. Filters from a previous query carry forw
   → 12 rows sorted descending (inherits both filters)
 ```
 
----
-
-## Screenshots
-
-> Replace these placeholders with actual screenshots after running the application.
-
-| View | Description |
-|:-----|:------------|
-| `screenshots/hero.png` | Landing page with hero section and status badges |
-| `screenshots/dashboard.png` | KPI cards and key statistics after dataset upload |
-| `screenshots/chat.png` | Chat interface with user/AI messages and confidence badge |
-| `screenshots/pipeline.png` | Execution details panel showing the audit trail timeline |
-| `screenshots/charts.png` | Auto-generated Plotly visualization with dark theme |
-| `screenshots/insights.png` | AI-generated insights section |
-
----
 
 ## Technical Highlights
 
