@@ -477,15 +477,19 @@ div.stButton > button {
     border-radius: var(--radius) !important;
     background: var(--surface) !important;
 }
-[data-testid="stFileUploader"] {
+[data-testid="stFileUploaderDropzone"] {
     background: var(--surface) !important;
     border: 1px dashed var(--border-hover) !important;
     border-radius: var(--radius-lg) !important;
-    padding: 20px !important;
+    padding: 24px !important;
+    transition: var(--transition) !important;
 }
-[data-testid="stFileUploader"]:hover {
+[data-testid="stFileUploaderDropzone"]:hover {
     border-color: var(--primary) !important;
     background: var(--card) !important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+    border-radius: var(--radius-sm) !important;
 }
 
 @keyframes fadeIn {
