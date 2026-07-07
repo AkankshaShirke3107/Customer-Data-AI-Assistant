@@ -62,149 +62,663 @@ st.set_page_config(
 )
 
 
-# --------------------------------------------------------------------------
-# THEME / CSS — Premium SaaS appearance
-# --------------------------------------------------------------------------
-def inject_css(dark_mode: bool) -> None:
-    """Inject a premium CSS theme with smooth transitions and modern typography."""
-    if dark_mode:
-        bg = "#0F1116"
-        panel = "#1A1D27"
-        text = "#F2F3F7"
-        sub = "#9AA1B5"
-        accent = "#7C8CFF"
-        border = "#2A2E3D"
-        card_shadow = "rgba(0,0,0,0.3)"
-        hover_lift = "rgba(124,140,255,0.08)"
-    else:
-        bg = "#F7F8FC"
-        panel = "#FFFFFF"
-        text = "#1A1D27"
-        sub = "#666E82"
-        accent = "#6366F1"
-        border = "#E7E9F3"
-        card_shadow = "rgba(0,0,0,0.06)"
-        hover_lift = "rgba(99,102,241,0.06)"
-
+# ==========================================================================
+# PREMIUM CSS — Vercel / Linear / Stripe-inspired dark theme
+# ==========================================================================
+def inject_premium_css() -> None:
     st.markdown(
-        f"""
+        """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        /* ================================================================
+           FONTS
+           ================================================================ */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
-        *, html, body, .stApp {{ font-family: 'Inter', sans-serif !important; }}
-        .stApp {{ background-color: {bg}; color: {text}; }}
-        section[data-testid="stSidebar"] {{
-            background-color: {panel}; border-right: 1px solid {border};
-        }}
+        :root {
+            --bg:          #09090B;
+            --surface:     #111113;
+            --card:        #18181B;
+            --card-hover:  #1F1F23;
+            --border:      rgba(255,255,255,.06);
+            --border-sub:  rgba(255,255,255,.04);
+            --text:        #FAFAFA;
+            --text-2:      #A1A1AA;
+            --text-3:      #71717A;
+            --primary:     #3B82F6;
+            --primary-dim: rgba(59,130,246,.12);
+            --secondary:   #8B5CF6;
+            --success:     #22C55E;
+            --success-dim: rgba(34,197,94,.10);
+            --warning:     #F59E0B;
+            --danger:      #EF4444;
+            --radius:      14px;
+            --radius-lg:   20px;
+            --radius-sm:   8px;
+            --font:        'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --mono:        'JetBrains Mono', 'Fira Code', monospace;
+            --shadow:      0 0 0 1px var(--border), 0 2px 12px rgba(0,0,0,.4);
+            --shadow-lg:   0 0 0 1px var(--border), 0 8px 40px rgba(0,0,0,.5);
+            --transition:  all .2s cubic-bezier(.4,0,.2,1);
+        }
 
-        /* ---------- Metric cards ---------- */
-        .metric-card {{
-            background: {panel}; border: 1px solid {border}; border-radius: 16px;
-            padding: 20px 22px; text-align: left;
-            box-shadow: 0 2px 8px {card_shadow};
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }}
-        .metric-card:hover {{
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px {card_shadow};
-        }}
-        .metric-value {{ font-size: 30px; font-weight: 800; color: {accent}; }}
-        .metric-label {{ font-size: 13px; color: {sub}; margin-top: 4px; font-weight: 500; }}
+        /* ================================================================
+           GLOBAL RESETS
+           ================================================================ */
+        *, html, body, .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        .stMarkdown, .stText, p, span, label, li, td, th, h1, h2, h3, h4, h5, h6,
+        input, textarea, button, select, code, pre,
+        div[data-testid="stChatMessage"] p {
+            font-family: var(--font) !important;
+        }
+        code, pre, .stCode {
+            font-family: var(--mono) !important;
+        }
 
-        /* ---------- App header ---------- */
-        .app-header {{
-            padding: 28px 30px; border-radius: 20px; margin-bottom: 22px;
-            background: linear-gradient(135deg, {accent}22, {accent}08);
-            border: 1px solid {border};
-        }}
-        .app-title {{
-            font-size: 32px; font-weight: 800; color: {text}; margin-bottom: 4px;
-            letter-spacing: -0.5px;
-        }}
-        .app-tagline {{ font-size: 15px; color: {sub}; font-weight: 500; }}
+        .stApp {
+            background: var(--bg) !important;
+            color: var(--text) !important;
+        }
 
-        /* ---------- Insight pills ---------- */
-        .insight-pill {{
-            display: block; background: {panel}; border: 1px solid {border};
-            border-radius: 12px; padding: 12px 16px; margin-bottom: 10px;
-            font-size: 14px; color: {text}; font-weight: 500;
-            transition: background 0.2s ease;
-        }}
-        .insight-pill:hover {{ background: {hover_lift}; }}
+        /* Hide Streamlit branding */
+        #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden !important; height: 0 !important; }
+        .stDeployButton { display: none !important; }
+        div[data-testid="stDecoration"] { display: none !important; }
+        div[data-testid="stStatusWidget"] { display: none !important; }
 
-        /* ---------- Chat bubbles ---------- */
-        .chat-bubble-user {{
-            background: linear-gradient(135deg, {accent}, {accent}DD);
-            color: white; padding: 12px 18px; border-radius: 18px 18px 4px 18px;
-            display: inline-block; margin: 8px 0; max-width: 85%;
-            font-weight: 500; box-shadow: 0 2px 8px {card_shadow};
-        }}
-        .chat-bubble-ai {{
-            background: {panel}; border: 1px solid {border}; color: {text};
-            padding: 12px 18px; border-radius: 18px 18px 18px 4px;
-            display: inline-block; margin: 8px 0; max-width: 85%;
-            box-shadow: 0 2px 8px {card_shadow};
-        }}
+        /* Main container spacing */
+        .block-container {
+            padding: 2rem 3rem 4rem 3rem !important;
+            max-width: 1280px !important;
+        }
 
-        /* ---------- Confidence badge ---------- */
-        .confidence-badge {{
-            display: inline-block; padding: 4px 12px; border-radius: 999px;
-            font-size: 12px; font-weight: 600;
-            background: {accent}18; color: {accent};
-        }}
-        .confidence-badge-high {{
-            background: #10B98118; color: #10B981;
-        }}
-
-        /* ---------- Pipeline step ---------- */
-        .pipeline-step {{
-            display: flex; align-items: center; gap: 10px;
-            padding: 8px 0; font-size: 13px; color: {sub};
-        }}
-        .pipeline-icon {{
-            width: 28px; height: 28px; border-radius: 8px;
-            background: {accent}15; color: {accent};
-            display: flex; align-items: center; justify-content: center;
-            font-size: 14px; font-weight: 700; flex-shrink: 0;
-        }}
-
-        /* ---------- Suggested query cards ---------- */
-        .sugg-card {{
-            background: {panel}; border: 1px solid {border}; border-radius: 12px;
-            padding: 0; text-align: center;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            cursor: pointer;
-        }}
-        .sugg-card:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px {card_shadow};
-        }}
-
-        /* ---------- Section headers ---------- */
-        .section-header {{
-            font-size: 20px; font-weight: 700; color: {text};
-            margin: 24px 0 12px 0; letter-spacing: -0.3px;
-        }}
-
-        /* ---------- Buttons ---------- */
-        div.stButton > button {{
-            border-radius: 10px; border: 1px solid {border}; font-weight: 600;
-            transition: all 0.2s ease;
-        }}
-        div.stButton > button:hover {{
-            border-color: {accent}; color: {accent};
-        }}
-
-        /* ---------- Expander styling ---------- */
-        .streamlit-expanderHeader {{
+        /* ================================================================
+           SIDEBAR — Navigation Panel
+           ================================================================ */
+        section[data-testid="stSidebar"] {
+            background: var(--surface) !important;
+            border-right: 1px solid var(--border) !important;
+        }
+        section[data-testid="stSidebar"] .block-container {
+            padding: 1.5rem 1.25rem !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+            color: var(--text-2) !important;
+            font-size: 13px !important;
+        }
+        section[data-testid="stSidebar"] .stSelectbox label,
+        section[data-testid="stSidebar"] .stFileUploader label {
+            color: var(--text-2) !important;
+            font-size: 12px !important;
+            text-transform: uppercase !important;
+            letter-spacing: .06em !important;
             font-weight: 600 !important;
-        }}
+        }
 
-        /* ---------- Footer ---------- */
-        .app-footer {{
-            text-align: center; padding: 20px 0; font-size: 12px;
-            color: {sub}; border-top: 1px solid {border}; margin-top: 40px;
-        }}
+        /* Sidebar section labels */
+        .sidebar-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--text-3);
+            margin: 20px 0 8px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-sub);
+        }
+        .sidebar-version {
+            font-size: 11px;
+            color: var(--text-3);
+            text-align: center;
+            padding: 16px 0 4px;
+            border-top: 1px solid var(--border-sub);
+            margin-top: 24px;
+        }
+
+        /* ================================================================
+           HERO SECTION
+           ================================================================ */
+        .hero {
+            position: relative;
+            padding: 48px 0 40px;
+            margin-bottom: 8px;
+        }
+        .hero::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 50%;
+            transform: translateX(-50%);
+            width: 600px; height: 300px;
+            background: radial-gradient(ellipse, rgba(59,130,246,.06) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+        }
+        .hero-badge-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: .02em;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text-2);
+        }
+        .hero-badge .dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .hero-badge .dot-green { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .hero-badge .dot-blue  { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+        .hero-badge .dot-purple { background: var(--secondary); box-shadow: 0 0 6px var(--secondary); }
+
+        .hero-title {
+            font-size: 44px;
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            line-height: 1.1;
+            color: var(--text);
+            margin: 0 0 12px;
+            background: linear-gradient(135deg, #FAFAFA 0%, #A1A1AA 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-subtitle {
+            font-size: 16px;
+            font-weight: 400;
+            color: var(--text-3);
+            max-width: 540px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* ================================================================
+           KPI / METRIC CARDS — Glass Bento Grid
+           ================================================================ */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin: 8px 0 28px;
+        }
+        @media (max-width: 768px) {
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .kpi-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 18px 16px;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            opacity: 0;
+            transition: opacity .3s ease;
+        }
+        .kpi-card:hover {
+            background: var(--card-hover);
+            border-color: rgba(255,255,255,.10);
+            transform: translateY(-2px);
+        }
+        .kpi-card:hover::before { opacity: 1; }
+        .kpi-icon {
+            width: 32px; height: 32px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            margin-bottom: 12px;
+        }
+        .kpi-icon-blue    { background: var(--primary-dim); color: var(--primary); }
+        .kpi-icon-purple  { background: rgba(139,92,246,.12); color: var(--secondary); }
+        .kpi-icon-amber   { background: rgba(245,158,11,.10); color: var(--warning); }
+        .kpi-icon-red     { background: rgba(239,68,68,.10); color: var(--danger); }
+        .kpi-icon-green   { background: var(--success-dim); color: var(--success); }
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -.5px;
+            line-height: 1.2;
+        }
+        .kpi-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-3);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        /* ================================================================
+           SECTION HEADERS
+           ================================================================ */
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--text-3);
+            margin: 36px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* ================================================================
+           INSIGHT CARDS
+           ================================================================ */
+        .insight-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 18px;
+            margin-bottom: 8px;
+            font-size: 13.5px;
+            color: var(--text-2);
+            line-height: 1.55;
+            transition: var(--transition);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .insight-card:hover {
+            background: var(--card-hover);
+            border-color: rgba(255,255,255,.10);
+        }
+        .insight-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--primary);
+            flex-shrink: 0;
+            margin-top: 7px;
+        }
+
+        /* ================================================================
+           SUGGESTED QUESTION CHIPS
+           ================================================================ */
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 12px 0 20px;
+        }
+
+        /* ================================================================
+           CHAT EXPERIENCE — ChatGPT-style
+           ================================================================ */
+        .chat-turn {
+            padding: 24px 0;
+            border-bottom: 1px solid var(--border-sub);
+            animation: fadeInUp .35s ease;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .chat-row {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            max-width: 860px;
+        }
+        .chat-row-user { justify-content: flex-end; margin-left: auto; }
+        .chat-avatar {
+            width: 30px; height: 30px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .avatar-user { background: var(--primary-dim); color: var(--primary); }
+        .avatar-ai   { background: rgba(139,92,246,.12); color: var(--secondary); }
+
+        .chat-msg-user {
+            background: var(--primary);
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 16px 16px 4px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            max-width: 70%;
+            line-height: 1.5;
+        }
+        .chat-msg-ai {
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 14px 18px;
+            border-radius: 4px 16px 16px 16px;
+            font-size: 14px;
+            line-height: 1.6;
+            max-width: 85%;
+        }
+        .chat-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 8px;
+            padding-left: 44px;
+        }
+        .chat-timestamp {
+            font-size: 11px;
+            color: var(--text-3);
+            font-family: var(--mono) !important;
+        }
+        .chat-exec-time {
+            font-size: 11px;
+            color: var(--text-3);
+            font-family: var(--mono) !important;
+        }
+
+        /* Confidence badge */
+        .conf-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            background: var(--success-dim);
+            color: var(--success);
+            border: 1px solid rgba(34,197,94,.15);
+        }
+        .conf-dot {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 4px var(--success);
+        }
+
+        /* ================================================================
+           EXPLAINABILITY PIPELINE — Timeline
+           ================================================================ */
+        .pipeline {
+            position: relative;
+            padding-left: 28px;
+            margin: 12px 0;
+        }
+        .pipeline::before {
+            content: '';
+            position: absolute;
+            left: 11px;
+            top: 8px;
+            bottom: 8px;
+            width: 1px;
+            background: var(--border);
+        }
+        .pipe-step {
+            position: relative;
+            padding: 8px 0 8px 16px;
+            font-size: 13px;
+            color: var(--text-2);
+            line-height: 1.5;
+        }
+        .pipe-step::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 14px;
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 2px solid var(--bg);
+            box-shadow: 0 0 0 2px var(--primary-dim);
+        }
+        .pipe-step:last-child::before {
+            background: var(--success);
+            box-shadow: 0 0 0 2px var(--success-dim);
+        }
+        .pipe-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--text-3);
+            margin-bottom: 2px;
+        }
+        .pipe-value {
+            color: var(--text);
+            font-weight: 500;
+        }
+        .pipe-value code {
+            background: var(--surface);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--primary);
+            border: 1px solid var(--border);
+        }
+
+        /* Stats row in explainability */
+        .stat-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .stat-mini {
+            background: var(--surface);
+            border: 1px solid var(--border-sub);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            text-align: center;
+        }
+        .stat-mini-val {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+            font-family: var(--mono) !important;
+        }
+        .stat-mini-lbl {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--text-3);
+            margin-top: 2px;
+        }
+
+        /* ================================================================
+           EMPTY STATE
+           ================================================================ */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+        .empty-icon {
+            width: 64px; height: 64px;
+            border-radius: 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+        .empty-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        .empty-desc {
+            font-size: 14px;
+            color: var(--text-3);
+            max-width: 400px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* ================================================================
+           CHART CONTAINER
+           ================================================================ */
+        .chart-wrap {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin: 12px 0;
+        }
+
+        /* ================================================================
+           BUTTONS
+           ================================================================ */
+        div.stButton > button {
+            background: var(--card) !important;
+            color: var(--text-2) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius-sm) !important;
+            font-size: 13px !important;
+            font-weight: 500 !important;
+            padding: 6px 14px !important;
+            transition: var(--transition) !important;
+        }
+        div.stButton > button:hover {
+            background: var(--card-hover) !important;
+            color: var(--text) !important;
+            border-color: rgba(255,255,255,.12) !important;
+        }
+        div.stButton > button:active {
+            transform: scale(.98) !important;
+        }
+
+        /* Download buttons */
+        div.stDownloadButton > button {
+            background: var(--surface) !important;
+            color: var(--text-2) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius-sm) !important;
+            font-size: 12px !important;
+            font-weight: 500 !important;
+            transition: var(--transition) !important;
+        }
+        div.stDownloadButton > button:hover {
+            background: var(--card) !important;
+            color: var(--text) !important;
+        }
+
+        /* ================================================================
+           EXPANDER
+           ================================================================ */
+        .streamlit-expanderHeader {
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            color: var(--text-2) !important;
+            background: var(--surface) !important;
+            border-radius: var(--radius-sm) !important;
+        }
+        [data-testid="stExpander"] {
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius) !important;
+            background: var(--card) !important;
+        }
+
+        /* ================================================================
+           DATAFRAME
+           ================================================================ */
+        [data-testid="stDataFrame"] {
+            border-radius: var(--radius) !important;
+            border: 1px solid var(--border) !important;
+        }
+
+        /* ================================================================
+           CHAT INPUT
+           ================================================================ */
+        [data-testid="stChatInput"] {
+            border-color: var(--border) !important;
+        }
+        [data-testid="stChatInput"]:focus-within {
+            border-color: var(--primary) !important;
+            box-shadow: 0 0 0 2px var(--primary-dim) !important;
+        }
+
+        /* ================================================================
+           FILE UPLOADER
+           ================================================================ */
+        [data-testid="stFileUploader"] {
+            border: 1px dashed var(--border) !important;
+            border-radius: var(--radius) !important;
+            transition: var(--transition) !important;
+        }
+        [data-testid="stFileUploader"]:hover {
+            border-color: rgba(255,255,255,.15) !important;
+        }
+
+        /* ================================================================
+           DIVIDER
+           ================================================================ */
+        hr {
+            border-color: var(--border-sub) !important;
+            margin: 8px 0 !important;
+        }
+
+        /* ================================================================
+           FOOTER
+           ================================================================ */
+        .app-footer {
+            text-align: center;
+            padding: 32px 0 8px;
+            font-size: 12px;
+            color: var(--text-3);
+            border-top: 1px solid var(--border-sub);
+            margin-top: 48px;
+        }
+        .app-footer a {
+            color: var(--text-2);
+            text-decoration: none;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.15); }
+
+        /* ================================================================
+           ANIMATIONS
+           ================================================================ */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+        .fade-in { animation: fadeIn .4s ease; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -212,7 +726,7 @@ def inject_css(dark_mode: bool) -> None:
 
 
 # --------------------------------------------------------------------------
-# CACHED HELPERS
+# CACHED HELPERS (unchanged backend logic)
 # --------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def cached_load_dataframe(file_bytes: bytes) -> pd.DataFrame:
@@ -292,79 +806,97 @@ def _trim_chat_history() -> None:
         st.session_state.chat_history = history[-MAX_CHAT_HISTORY:]
 
 
-# --------------------------------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------------------------------
+# ==========================================================================
+# SIDEBAR — Premium Navigation Panel
+# ==========================================================================
 with st.sidebar:
-    st.markdown("## ⚙️ Settings")
-    dark_mode = st.toggle("🌙 Dark mode", value=True)
-    st.divider()
+    st.markdown(
+        '<div style="text-align:center;padding:12px 0 4px;">'
+        '<span style="font-size:18px;font-weight:700;letter-spacing:-.5px;'
+        'color:#FAFAFA;">DataLens</span>'
+        '<span style="font-size:10px;color:#71717A;margin-left:6px;'
+        'font-weight:500;">AI</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("## 📁 Data Source")
+    st.markdown('<div class="sidebar-label">Data Source</div>', unsafe_allow_html=True)
     uploaded_file = st.file_uploader(
-        "Upload your Excel file (.xlsx)", type=["xlsx", "xls"]
+        "Upload Excel (.xlsx)", type=["xlsx", "xls"], label_visibility="collapsed"
     )
     use_sample = False
     if uploaded_file is None:
-        use_sample = st.checkbox(
-            "Use bundled sample dataset (Pune real-estate leads)", value=True
-        )
+        use_sample = st.checkbox("Use sample dataset", value=True)
 
-    st.divider()
-    st.markdown("## 🔑 Gemini API")
+    st.markdown('<div class="sidebar-label">AI Configuration</div>', unsafe_allow_html=True)
     if gemini_helper.is_configured():
-        st.success("✅ Gemini API key detected.")
+        st.markdown(
+            '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#22C55E;">'
+            '<span style="width:6px;height:6px;border-radius:50%;background:#22C55E;'
+            'box-shadow:0 0 6px #22C55E;display:inline-block;"></span>'
+            'Gemini API connected</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.warning(
-            "No GEMINI_API_KEY found. The app will still work using a "
-            "rule-based fallback engine, but AI summaries/insights will "
-            "be simplified."
+        st.markdown(
+            '<div style="font-size:12px;color:#F59E0B;">No API key — using fallback engine</div>',
+            unsafe_allow_html=True,
         )
         manual_key = st.text_input(
-            "Paste a Gemini API key for this session (optional)",
-            type="password",
+            "API Key", type="password", label_visibility="collapsed",
+            placeholder="Paste Gemini API key..."
         )
         if manual_key:
-            # Store in session state for isolation; also set env so
-            # the Gemini helper picks it up within this process.
             st.session_state["_gemini_key"] = manual_key
             os.environ["GEMINI_API_KEY"] = manual_key
             st.rerun()
 
-    st.divider()
-    if st.button("🗑️ Clear chat history"):
+    st.markdown('<div class="sidebar-label">Session</div>', unsafe_allow_html=True)
+    if st.button("Clear conversation", use_container_width=True):
         st.session_state.pop("chat_history", None)
         st.session_state.pop("last_conditions", None)
         st.rerun()
 
-    # About section
-    st.divider()
-    st.markdown("## ℹ️ About")
-    st.caption(
-        "**Customer Data AI Assistant** v2.0\n\n"
-        "Built with Streamlit · Pandas · Plotly · Google Gemini\n\n"
-        "Every number in every answer is computed by pandas. "
-        "Gemini only understands your question and phrases the result."
+    st.markdown(
+        '<div class="sidebar-version">'
+        'Customer Data AI Assistant · v2.0<br>'
+        '<span style="font-size:10px;">Pandas engine · Zero hallucination</span>'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
-inject_css(dark_mode)
 
-# --------------------------------------------------------------------------
-# HEADER
-# --------------------------------------------------------------------------
+# Inject CSS
+inject_premium_css()
+
+
+# ==========================================================================
+# HERO SECTION
+# ==========================================================================
 st.markdown(
     """
-    <div class="app-header">
-        <div class="app-title">📊 Customer Data AI Assistant</div>
-        <div class="app-tagline">Chat with your Excel data using Natural Language — zero hallucination guaranteed.</div>
+    <div class="hero">
+        <div class="hero-content">
+            <div class="hero-badge-row">
+                <span class="hero-badge"><span class="dot dot-green"></span>Zero Hallucination</span>
+                <span class="hero-badge"><span class="dot dot-blue"></span>Powered by Pandas</span>
+                <span class="hero-badge"><span class="dot dot-purple"></span>AI Assisted</span>
+            </div>
+            <h1 class="hero-title">Customer Data AI Assistant</h1>
+            <p class="hero-subtitle">
+                Ask questions about your Excel data in plain English.
+                Every answer is computed deterministically by Pandas — never guessed by AI.
+            </p>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# --------------------------------------------------------------------------
-# LOAD DATA
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# DATA LOADING (backend unchanged)
+# ==========================================================================
 df = None
 load_error = None
 
@@ -386,97 +918,103 @@ if load_error:
     st.stop()
 
 if df is None:
-    # Premium empty state
-    st.markdown("---")
-    col_a, col_b, col_c = st.columns([1, 2, 1])
-    with col_b:
-        st.markdown(
-            """
-            <div style="text-align:center; padding: 60px 20px;">
-                <div style="font-size: 64px; margin-bottom: 16px;">📂</div>
-                <div style="font-size: 22px; font-weight: 700; margin-bottom: 8px;">
-                    No dataset loaded
-                </div>
-                <div style="font-size: 15px; color: #9AA1B5; max-width: 400px; margin: 0 auto;">
-                    Upload an Excel file from the sidebar or check
-                    <b>"Use bundled sample dataset"</b> to explore the app instantly.
-                </div>
+    st.markdown(
+        """
+        <div class="empty-state fade-in">
+            <div class="empty-icon">↑</div>
+            <div class="empty-title">No dataset loaded</div>
+            <div class="empty-desc">
+                Upload an Excel file from the sidebar, or enable the sample
+                dataset to start exploring instantly.
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 df_h = _df_hash(df)
 schema = cached_schema(df_h, df)
 profile = cached_profile(df_h, df)
 
-# --------------------------------------------------------------------------
-# DATASET OVERVIEW — Metric cards with hover effects
-# --------------------------------------------------------------------------
-st.markdown('<div class="section-header">📋 Dataset Overview</div>', unsafe_allow_html=True)
-c1, c2, c3, c4 = st.columns(4)
-metrics = [
-    ("📊", "Rows", profile["rows"]),
-    ("📐", "Columns", profile["columns"]),
-    ("⚠️", "Missing Values", profile["missing_total"]),
-    ("♻️", "Duplicate Rows", profile["duplicate_rows"]),
-]
-for col, (icon, label, value) in zip((c1, c2, c3, c4), metrics):
-    col.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">{icon} {value:,}</div>'
-        f'<div class="metric-label">{label}</div></div>',
-        unsafe_allow_html=True,
-    )
 
-# --------------------------------------------------------------------------
-# KEY INSIGHTS DASHBOARD — Budget, location, type stats
-# --------------------------------------------------------------------------
-st.markdown('<div class="section-header">📈 Key Statistics</div>', unsafe_allow_html=True)
-stat_cols = st.columns(4)
-stat_idx = 0
+# ==========================================================================
+# KPI CARDS — Bento Grid
+# ==========================================================================
+st.markdown('<div class="section-title">Overview</div>', unsafe_allow_html=True)
+
+kpi_html = '<div class="kpi-grid">'
+kpi_items = [
+    ("kpi-icon-blue",   "⊞", "Rows",           f"{profile['rows']:,}"),
+    ("kpi-icon-purple", "⊟", "Columns",         f"{profile['columns']}"),
+    ("kpi-icon-amber",  "⚠", "Missing Values",  f"{profile['missing_total']:,}"),
+    ("kpi-icon-red",    "⊗", "Duplicates",       f"{profile['duplicate_rows']:,}"),
+]
+for icon_cls, icon_char, label, value in kpi_items:
+    kpi_html += f"""
+    <div class="kpi-card">
+        <div class="kpi-icon {icon_cls}">{icon_char}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-label">{label}</div>
+    </div>
+    """
+kpi_html += '</div>'
+st.markdown(kpi_html, unsafe_allow_html=True)
+
+
+# ==========================================================================
+# KEY STATISTICS — Second row of KPI cards
+# ==========================================================================
+stats_html = '<div class="kpi-grid">'
+stat_count = 0
 
 if schema.primary_budget_col and schema.primary_budget_col in df.columns:
     series = pd.to_numeric(df[schema.primary_budget_col], errors="coerce").dropna()
     if not series.empty:
-        stat_cols[0].markdown(
-            f'<div class="metric-card">'
-            f'<div class="metric-value">₹{series.mean():,.0f}</div>'
-            f'<div class="metric-label">Avg {schema.primary_budget_col}</div></div>',
-            unsafe_allow_html=True,
-        )
-        stat_cols[1].markdown(
-            f'<div class="metric-card">'
-            f'<div class="metric-value">₹{series.max():,.0f}</div>'
-            f'<div class="metric-label">Highest {schema.primary_budget_col}</div></div>',
-            unsafe_allow_html=True,
-        )
-        stat_idx = 2
+        stats_html += f"""
+        <div class="kpi-card">
+            <div class="kpi-icon kpi-icon-green">₹</div>
+            <div class="kpi-value">₹{series.mean():,.0f}</div>
+            <div class="kpi-label">Avg {schema.primary_budget_col}</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon kpi-icon-blue">↑</div>
+            <div class="kpi-value">₹{series.max():,.0f}</div>
+            <div class="kpi-label">Highest {schema.primary_budget_col}</div>
+        </div>
+        """
+        stat_count = 2
 
 if schema.location_col and schema.location_col in df.columns:
     top_loc = df[schema.location_col].value_counts().idxmax()
-    stat_cols[stat_idx].markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">📍 {top_loc}</div>'
-        f'<div class="metric-label">Top {schema.location_col}</div></div>',
-        unsafe_allow_html=True,
-    )
-    stat_idx += 1
+    stats_html += f"""
+    <div class="kpi-card">
+        <div class="kpi-icon kpi-icon-purple">◎</div>
+        <div class="kpi-value">{top_loc}</div>
+        <div class="kpi-label">Top {schema.location_col}</div>
+    </div>
+    """
+    stat_count += 1
 
-if schema.property_type_col and schema.property_type_col in df.columns and stat_idx < 4:
+if schema.property_type_col and schema.property_type_col in df.columns and stat_count < 4:
     top_type = df[schema.property_type_col].value_counts().idxmax()
-    stat_cols[stat_idx].markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">🏠 {top_type}</div>'
-        f'<div class="metric-label">Top {schema.property_type_col}</div></div>',
-        unsafe_allow_html=True,
-    )
+    stats_html += f"""
+    <div class="kpi-card">
+        <div class="kpi-icon kpi-icon-amber">◈</div>
+        <div class="kpi-value">{top_type}</div>
+        <div class="kpi-label">Top {schema.property_type_col}</div>
+    </div>
+    """
 
-# --------------------------------------------------------------------------
+stats_html += '</div>'
+if stat_count > 0:
+    st.markdown(stats_html, unsafe_allow_html=True)
+
+
+# ==========================================================================
 # DATA PREVIEW & SCHEMA
-# --------------------------------------------------------------------------
-with st.expander("🔍 Preview data & column details", expanded=False):
+# ==========================================================================
+with st.expander("Data Preview & Schema", expanded=False):
     st.dataframe(df.head(DATA_PREVIEW_ROWS), use_container_width=True)
     detail_rows = [
         {
@@ -484,89 +1022,97 @@ with st.expander("🔍 Preview data & column details", expanded=False):
             "Type": p.dtype,
             "Missing": p.missing,
             "Missing %": p.missing_pct,
-            "Unique values": p.unique_count,
+            "Unique": p.unique_count,
             "Role": p.role,
-            "Sample values": ", ".join(map(str, p.sample_values)),
+            "Samples": ", ".join(map(str, p.sample_values)),
         }
         for p in profile["column_profiles"]
     ]
     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True)
 
-with st.expander("🧠 Detected schema (used by the query engine)", expanded=False):
+with st.expander("Detected Schema", expanded=False):
     st.json(schema.to_dict())
 
-# --------------------------------------------------------------------------
-# AI / rule-based insights
-# --------------------------------------------------------------------------
-st.markdown('<div class="section-header">✨ AI Insights</div>', unsafe_allow_html=True)
+
+# ==========================================================================
+# AI INSIGHTS
+# ==========================================================================
+st.markdown('<div class="section-title">Insights</div>', unsafe_allow_html=True)
 stat_lines = cached_rule_insights(df_h, df, schema)
 insight_key = "|".join(stat_lines)
 insights = stat_lines
 if gemini_helper.is_configured():
-    with st.spinner("Generating insights..."):
+    with st.spinner("Analyzing dataset..."):
         insights = cached_gemini_insights(insight_key, stat_lines)
+
 for line in insights:
     st.markdown(
-        f'<div class="insight-pill">💡 {line}</div>',
+        f'<div class="insight-card">'
+        f'<span class="insight-dot"></span>'
+        f'<span>{line}</span></div>',
         unsafe_allow_html=True,
     )
 
+
 # Overview charts
-with st.expander("📈 Dataset visual profile", expanded=False):
+with st.expander("Visual Profile", expanded=False):
     overview_figs = charts.profile_overview_charts(df, schema)
     if not overview_figs:
         st.write("No suitable columns detected for automatic charts.")
     else:
         cols = st.columns(2)
         for i, (name, fig) in enumerate(overview_figs.items()):
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#A1A1AA", family="Inter, sans-serif"),
+            )
             with cols[i % 2]:
                 st.plotly_chart(
                     fig, use_container_width=True,
                     key=f"overview_{name}", config=CHART_CONFIG,
                 )
 
-st.divider()
 
-# --------------------------------------------------------------------------
-# SUGGESTED QUERY CARDS — Beautiful clickable cards
-# --------------------------------------------------------------------------
-st.markdown('<div class="section-header">💬 Ask a question about your data</div>', unsafe_allow_html=True)
+# ==========================================================================
+# SUGGESTED QUESTIONS — Chip Row
+# ==========================================================================
+st.markdown('<div class="section-title">Ask a Question</div>', unsafe_allow_html=True)
 
-suggested: list[tuple[str, str]] = []  # (icon, question)
+suggested: list[str] = []
 if schema.primary_budget_col:
-    suggested.append(("📈", f"What is the average {schema.primary_budget_col}?"))
-    # Guard: quantile only if column exists and has data
+    suggested.append(f"What is the average {schema.primary_budget_col}?")
     budget_series = pd.to_numeric(df[schema.primary_budget_col], errors="coerce").dropna()
     if not budget_series.empty:
         q75 = int(budget_series.quantile(0.75))
-        suggested.append(("💰", f"Show customers with {schema.primary_budget_col} above {q75}"))
+        suggested.append(f"Show customers with {schema.primary_budget_col} above {q75}")
 if schema.property_type_col:
-    suggested.append(("🏠", f"How many customers want each {schema.property_type_col}?"))
+    suggested.append(f"How many customers want each {schema.property_type_col}?")
 if schema.location_col:
     budget_label = schema.primary_budget_col or "value"
-    suggested.append(("📍", f"Which {schema.location_col} has the highest average {budget_label}?"))
+    suggested.append(f"Which {schema.location_col} has the highest average {budget_label}?")
 if schema.status_col:
-    suggested.append(("📊", f"Give me a breakdown of {schema.status_col}"))
+    suggested.append(f"Breakdown of {schema.status_col}")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-st.markdown("**Suggested questions:**")
 sugg_cols = st.columns(min(len(suggested), 4) or 1)
 clicked_question = None
-for i, (icon, q) in enumerate(suggested[:4]):
+for i, q in enumerate(suggested[:4]):
     with sugg_cols[i % len(sugg_cols)]:
-        if st.button(f"{icon} {q}", key=f"sugg_{i}", use_container_width=True):
+        if st.button(q, key=f"sugg_{i}", use_container_width=True):
             clicked_question = q
 
-question = st.chat_input("e.g. How many customers have a budget above 1 crore?")
+question = st.chat_input("Ask anything about your data...")
 final_question = clicked_question or question
 
-# --------------------------------------------------------------------------
-# QUERY PROCESSING with follow-up context
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# QUERY PROCESSING (backend unchanged)
+# ==========================================================================
 if final_question:
-    with st.spinner("⏳ Analyzing your question..."):
+    with st.spinner("Processing..."):
         columns = list(df.columns)
         schema_dict = schema.to_dict()
 
@@ -579,7 +1125,7 @@ if final_question:
         if intent is None:
             intent = rule_based_intent(final_question, schema, df)
 
-        # Follow-up context: merge previous conditions if appropriate
+        # Follow-up context
         prev_conditions = st.session_state.get("last_conditions", [])
         q_lower = final_question.lower()
         is_follow_up = any(
@@ -593,7 +1139,6 @@ if final_question:
         engine = QueryEngine(df, schema)
         result = engine.execute(intent)
 
-        # Store conditions for follow-up
         if result.success:
             st.session_state["last_conditions"] = intent.get("conditions", [])
 
@@ -630,31 +1175,44 @@ if final_question:
         )
         _trim_chat_history()
 
-# --------------------------------------------------------------------------
-# RENDER CHAT HISTORY (most recent first)
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# RENDER CHAT HISTORY — ChatGPT-style conversation
+# ==========================================================================
 for turn_idx, turn in enumerate(reversed(st.session_state.chat_history)):
     result = turn["result"]
 
-    # User bubble
+    st.markdown('<div class="chat-turn">', unsafe_allow_html=True)
+
+    # User message
     st.markdown(
-        f'<div class="chat-bubble-user">🧑 {turn["question"]}</div>',
+        f'<div class="chat-row chat-row-user">'
+        f'<div class="chat-msg-user">{turn["question"]}</div>'
+        f'<div class="chat-avatar avatar-user">U</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
-    # AI bubble
+    # AI message
     st.markdown(
-        f'<div class="chat-bubble-ai">🤖 {turn["summary"]}</div>',
+        f'<div class="chat-row" style="margin-top:12px;">'
+        f'<div class="chat-avatar avatar-ai">AI</div>'
+        f'<div class="chat-msg-ai">{turn["summary"]}</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
-    # Confidence badge
+    # Meta row: confidence, timestamp, exec time
     st.markdown(
-        '<span class="confidence-badge confidence-badge-high">'
-        "🟢 High Confidence — Computed directly from uploaded dataset. "
-        "No AI estimation used.</span>",
+        f'<div class="chat-meta">'
+        f'<span class="conf-badge"><span class="conf-dot"></span>Deterministic</span>'
+        f'<span class="chat-timestamp">{turn.get("timestamp", "")}</span>'
+        f'<span class="chat-exec-time">{turn["execution_time_ms"]:.0f}ms</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Data table + downloads
     if (
@@ -668,7 +1226,7 @@ for turn_idx, turn in enumerate(reversed(st.session_state.chat_history)):
         dl1, dl2 = st.columns(2)
         csv_bytes = result.table_result.to_csv(index=False).encode("utf-8")
         dl1.download_button(
-            "⬇️ Download filtered data (CSV)",
+            "Download CSV",
             csv_bytes,
             file_name=f"result_{turn_idx}.csv",
             mime="text/csv",
@@ -676,7 +1234,7 @@ for turn_idx, turn in enumerate(reversed(st.session_state.chat_history)):
         )
         summary_bytes = turn["summary"].encode("utf-8")
         dl2.download_button(
-            "⬇️ Download summary (TXT)",
+            "Download Summary",
             summary_bytes,
             file_name=f"summary_{turn_idx}.txt",
             mime="text/plain",
@@ -685,76 +1243,112 @@ for turn_idx, turn in enumerate(reversed(st.session_state.chat_history)):
 
     # Chart
     if turn["fig"] is not None:
+        fig = turn["fig"]
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#A1A1AA", family="Inter, sans-serif"),
+        )
+        st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
         st.plotly_chart(
-            turn["fig"],
+            fig,
             use_container_width=True,
             key=f"chart_{turn_idx}",
             config=CHART_CONFIG,
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Explainability Panel
-    with st.expander("🔎 How was this answer calculated?"):
-        st.markdown(f"**Operation:** `{result.operation}`")
-        st.markdown(f"**Explanation:** {result.explanation or 'N/A'}")
+    # Explainability Panel — Timeline
+    with st.expander("Execution Details"):
+        # Stats grid
         st.markdown(
-            f"**Columns used:** "
-            f"{', '.join(result.columns_used) if result.columns_used else 'N/A'}"
+            f"""
+            <div class="stat-row">
+                <div class="stat-mini">
+                    <div class="stat-mini-val">{result.rows_scanned:,}</div>
+                    <div class="stat-mini-lbl">Rows Scanned</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-val">{result.rows_matched:,}</div>
+                    <div class="stat-mini-lbl">Rows Matched</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-val">{result.filters_applied}</div>
+                    <div class="stat-mini-lbl">Filters</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-val">{result.execution_time_ms:.1f}ms</div>
+                    <div class="stat-mini-lbl">Execution</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        st.markdown(f"**Rows scanned:** {result.rows_scanned:,}")
-        st.markdown(f"**Rows matched:** {result.rows_matched:,}")
-        st.markdown(f"**Filters applied:** {result.filters_applied}")
-        st.markdown(f"**Execution time:** {result.execution_time_ms:.1f} ms")
-        st.markdown(f"**Timestamp:** {turn.get('timestamp', 'N/A')}")
 
-        st.markdown("---")
-        st.markdown("**📋 Execution Pipeline:**")
-        pipeline_html = f"""
-        <div class="pipeline-step">
-            <div class="pipeline-icon">1</div>
-            <div><b>User Question:</b> {turn["question"]}</div>
-        </div>
-        <div class="pipeline-step">
-            <div class="pipeline-icon">2</div>
-            <div><b>Intent Detection:</b> {'Gemini AI' if turn["used_gemini_intent"] else 'Rule-based fallback'} → <code>{result.operation}</code></div>
-        </div>
-        <div class="pipeline-step">
-            <div class="pipeline-icon">3</div>
-            <div><b>Pandas Execution:</b> {result.explanation or 'N/A'}</div>
-        </div>
-        <div class="pipeline-step">
-            <div class="pipeline-icon">4</div>
-            <div><b>Result:</b> {'Scalar: ' + str(result.scalar_result) if result.scalar_result is not None else str(result.rows_matched) + ' rows'}</div>
-        </div>
-        <div class="pipeline-step">
-            <div class="pipeline-icon">5</div>
-            <div><b>Summary:</b> {'Gemini AI phrasing' if turn["used_gemini_summary"] else 'Template-based'}</div>
-        </div>
-        """
-        st.markdown(pipeline_html, unsafe_allow_html=True)
+        # Pipeline timeline
+        intent_method = "Gemini AI" if turn["used_gemini_intent"] else "Rule-based"
+        summary_method = "Gemini AI" if turn["used_gemini_summary"] else "Template"
+        scalar_display = (
+            f"Scalar: {result.scalar_result}"
+            if result.scalar_result is not None
+            else f"{result.rows_matched} rows"
+        )
+        cols_display = ", ".join(result.columns_used) if result.columns_used else "—"
+
+        st.markdown(
+            f"""
+            <div class="pipeline">
+                <div class="pipe-step">
+                    <div class="pipe-label">User Question</div>
+                    <div class="pipe-value">{turn["question"]}</div>
+                </div>
+                <div class="pipe-step">
+                    <div class="pipe-label">Intent Detection · {intent_method}</div>
+                    <div class="pipe-value"><code>{result.operation}</code> on [{cols_display}]</div>
+                </div>
+                <div class="pipe-step">
+                    <div class="pipe-label">Pandas Execution</div>
+                    <div class="pipe-value">{result.explanation or "—"}</div>
+                </div>
+                <div class="pipe-step">
+                    <div class="pipe-label">Result</div>
+                    <div class="pipe-value">{scalar_display}</div>
+                </div>
+                <div class="pipe-step">
+                    <div class="pipe-label">Summary · {summary_method}</div>
+                    <div class="pipe-value">Natural language phrasing of computed result</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         st.caption(
-            "Gemini only mapped this question to the operation/column above "
-            "and phrased the final sentence. The actual number was computed "
-            "by pandas — never by AI."
+            "Every number was computed by Pandas. Gemini only classified the "
+            "intent and phrased the result — it never computed a value."
         )
 
-        st.markdown("**Parsed intent:**")
-        st.json(turn["intent"])
+        with st.expander("Raw Intent JSON"):
+            st.json(turn["intent"])
 
-    st.divider()
 
+# Empty state hint
 if not st.session_state.chat_history:
-    st.caption(
-        "Ask a question above, or click one of the suggested questions to get started."
+    st.markdown(
+        '<div style="text-align:center;padding:40px 0;color:#71717A;font-size:13px;">'
+        'Type a question above or click a suggestion to get started.'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
-# --------------------------------------------------------------------------
+
+# ==========================================================================
 # FOOTER
-# --------------------------------------------------------------------------
+# ==========================================================================
 st.markdown(
     '<div class="app-footer">'
-    "Built with ❤️ using Streamlit · Pandas · Plotly · Google Gemini | "
-    "Every answer is computed by pandas — zero hallucination guaranteed"
-    "</div>",
+    'Customer Data AI Assistant · Built with Streamlit, Pandas, Plotly & Google Gemini<br>'
+    '<span style="font-size:11px;">Every answer is deterministic. Zero hallucination by design.</span>'
+    '</div>',
     unsafe_allow_html=True,
 )
