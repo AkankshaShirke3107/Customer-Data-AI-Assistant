@@ -81,6 +81,10 @@ flowchart TD
     style H fill:#150458,color:#fff,stroke:none
 ```
 
+<p align="center">
+  <img src="architecture.png" alt="Customer Data AI Assistant — Production Architecture Diagram" width="100%">
+</p>
+
 > **Design constraint:** Raw data never leaves the local process. Only column names and schema metadata are sent to the LLM for intent classification.
 
 ---
