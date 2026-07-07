@@ -58,29 +58,6 @@ If Gemini is unavailable, rate-limited, or unconfigured, the application continu
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    A[User Question] --> B[Streamlit Interface]
-    B --> C{Gemini Available?}
-    C -->|Yes| D[Gemini Intent Classification]
-    C -->|No| E[Rule-Based Intent Parser]
-    D --> F[Intent Validation]
-    E --> F
-    F --> G[Pandas Query Engine]
-    G --> H[DataFrame Operations]
-    H --> I{Result}
-    I --> J[Gemini Summarization]
-    I --> K[Plotly Auto-Visualization]
-    J --> L[Chat Response]
-    K --> L
-    L --> M[CSV / PNG Export]
-
-    style D fill:#4285F4,color:#fff,stroke:none
-    style J fill:#4285F4,color:#fff,stroke:none
-    style G fill:#150458,color:#fff,stroke:none
-    style H fill:#150458,color:#fff,stroke:none
-```
-
 <p align="center">
   <img src="architecture.png" alt="Customer Data AI Assistant — Production Architecture Diagram" width="100%">
 </p>
