@@ -2,6 +2,10 @@
 
 # Customer Data AI Assistant
 
+<p align="center">
+  <img src="R.webp" alt="Customer Data AI Assistant Banner" width="100%">
+</p>
+
 **Natural language analytics for Excel data — with deterministic, hallucination-free results.**
 
 Ask questions about your customer data in plain English. Get exact answers computed by Pandas, summarized by Gemini.
