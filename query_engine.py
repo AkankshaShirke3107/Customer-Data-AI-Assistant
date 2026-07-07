@@ -13,23 +13,23 @@ calculated?" with full transparency.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
 
+from config import OPERATIONS
 from utils import DatasetSchema, resolve_column
 
-OPERATIONS = {
-    "count", "sum", "average", "min", "max", "filter", "sort", "groupby",
-    "topn", "bottomn", "between", "greater_than", "less_than", "unique",
-    "distinct_count", "describe", "list",
-}
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class QueryResult:
+    """Encapsulates the outcome of a deterministic pandas query."""
     operation: str
     success: bool
     scalar_result: Any = None
@@ -37,13 +37,17 @@ class QueryResult:
     explanation: str = ""
     error: str | None = None
     columns_used: list[str] = field(default_factory=list)
-    confidence: float = 1.0  # 1.0 = fully deterministic pandas result
+    confidence: float = 1.0       # 1.0 = fully deterministic pandas result
+    execution_time_ms: float = 0  # wall-clock time for the pandas operation
+    filters_applied: int = 0      # number of filter conditions applied
+    rows_scanned: int = 0         # rows in the source before filters
+    rows_matched: int = 0         # rows after filters
 
 
 class QueryEngine:
     """Executes structured intents against a single dataframe + schema."""
 
-    def __init__(self, df: pd.DataFrame, schema: DatasetSchema):
+    def __init__(self, df: pd.DataFrame, schema: DatasetSchema) -> None:
         self.df = df
         self.schema = schema
 
@@ -66,7 +70,9 @@ class QueryEngine:
         numeric_cols = list(self.df.select_dtypes(include="number").columns)
         return numeric_cols[0] if numeric_cols else None
 
-    def _apply_conditions(self, df: pd.DataFrame, conditions: list[dict]) -> tuple[pd.DataFrame, list[str]]:
+    def _apply_conditions(
+        self, df: pd.DataFrame, conditions: list[dict]
+    ) -> tuple[pd.DataFrame, list[str]]:
         used: list[str] = []
         out = df
         for cond in conditions or []:
@@ -108,6 +114,7 @@ class QueryEngine:
     # Main entry point
     # ------------------------------------------------------------------
     def execute(self, intent: dict) -> QueryResult:
+        """Execute a structured intent and return a QueryResult."""
         op = (intent.get("operation") or "").lower().strip()
         if op not in OPERATIONS:
             return QueryResult(
@@ -121,26 +128,46 @@ class QueryEngine:
         try:
             handler = getattr(self, f"_op_{op}")
         except AttributeError:
-            return QueryResult(operation=op, success=False, error=f"No handler implemented for '{op}'.")
+            return QueryResult(
+                operation=op, success=False,
+                error=f"No handler implemented for '{op}'.",
+            )
 
+        t0 = time.time()
         try:
-            return handler(intent)
+            result = handler(intent)
+            result.execution_time_ms = round((time.time() - t0) * 1000, 1)
+            result.rows_scanned = len(self.df)
+            result.filters_applied = len(intent.get("conditions", []))
+            if result.table_result is not None:
+                result.rows_matched = len(result.table_result)
+            elif result.scalar_result is not None:
+                result.rows_matched = result.scalar_result if isinstance(result.scalar_result, int) else 0
+            logger.info(
+                "Query executed: op=%s, time=%.1fms, rows_matched=%d",
+                op, result.execution_time_ms, result.rows_matched,
+            )
+            return result
         except Exception as exc:  # noqa: BLE001
-            return QueryResult(operation=op, success=False, error=f"Could not execute query: {exc}")
+            elapsed = round((time.time() - t0) * 1000, 1)
+            logger.error("Query failed: op=%s, error=%s, time=%.1fms", op, exc, elapsed)
+            return QueryResult(
+                operation=op, success=False,
+                error=f"Could not execute query: {exc}",
+                execution_time_ms=elapsed,
+            )
 
     # ------------------------------------------------------------------
-    # Operation handlers - each returns a QueryResult
+    # Operation handlers – each returns a QueryResult
     # ------------------------------------------------------------------
     def _op_count(self, intent: dict) -> QueryResult:
         filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
         n = len(filtered)
         return QueryResult(
-            operation="count",
-            success=True,
-            scalar_result=n,
-            table_result=filtered,
-            columns_used=used,
-            explanation=f"Counted rows in the dataframe after applying {len(intent.get('conditions', []))} filter(s): {n} rows matched.",
+            operation="count", success=True, scalar_result=n,
+            table_result=filtered, columns_used=used,
+            explanation=f"Counted rows in the dataframe after applying "
+                        f"{len(intent.get('conditions', []))} filter(s): {n} rows matched.",
         )
 
     def _op_sum(self, intent: dict) -> QueryResult:
@@ -163,36 +190,37 @@ class QueryEngine:
             explanation=f"Computed df['{col}'].mean() after filters -> {avg}.",
         )
 
-    def _op_min(self, intent: dict) -> QueryResult:
+    def _op_extremum(self, intent: dict, func: str) -> QueryResult:
+        """Shared handler for min/max operations to avoid duplication."""
         col = self._numeric_col(intent.get("column"))
         filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
         series = pd.to_numeric(filtered[col], errors="coerce") if col else None
-        val = series.min() if series is not None and not series.empty else None
-        row = filtered.loc[[series.idxmin()]] if series is not None and not series.empty else filtered.head(0)
+        if series is not None and not series.empty:
+            val = getattr(series, func)()
+            idx_func = f"idx{func}"
+            row = filtered.loc[[getattr(series, idx_func)()]]
+        else:
+            val = None
+            row = filtered.head(0)
         return QueryResult(
-            operation="min", success=True, scalar_result=val, table_result=row,
+            operation=func, success=True, scalar_result=val, table_result=row,
             columns_used=[col] + used if col else used,
-            explanation=f"Computed df['{col}'].min() after filters -> {val}.",
+            explanation=f"Computed df['{col}'].{func}() after filters -> {val}.",
         )
 
+    def _op_min(self, intent: dict) -> QueryResult:
+        return self._op_extremum(intent, "min")
+
     def _op_max(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
-        series = pd.to_numeric(filtered[col], errors="coerce") if col else None
-        val = series.max() if series is not None and not series.empty else None
-        row = filtered.loc[[series.idxmax()]] if series is not None and not series.empty else filtered.head(0)
-        return QueryResult(
-            operation="max", success=True, scalar_result=val, table_result=row,
-            columns_used=[col] + used if col else used,
-            explanation=f"Computed df['{col}'].max() after filters -> {val}.",
-        )
+        return self._op_extremum(intent, "max")
 
     def _op_filter(self, intent: dict) -> QueryResult:
         filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
         return QueryResult(
             operation="filter", success=True, table_result=filtered, columns_used=used,
             scalar_result=len(filtered),
-            explanation=f"Applied {len(intent.get('conditions', []))} filter condition(s) -> {len(filtered)} matching rows.",
+            explanation=f"Applied {len(intent.get('conditions', []))} filter condition(s) "
+                        f"-> {len(filtered)} matching rows.",
         )
 
     def _op_greater_than(self, intent: dict) -> QueryResult:
@@ -225,7 +253,8 @@ class QueryEngine:
         return QueryResult(
             operation="between", success=True, table_result=filtered,
             scalar_result=len(filtered), columns_used=[col] + used,
-            explanation=f"Filtered rows where {col} is between {val} and {val2} -> {len(filtered)} rows.",
+            explanation=f"Filtered rows where {col} is between {val} and {val2} "
+                        f"-> {len(filtered)} rows.",
         )
 
     def _op_sort(self, intent: dict) -> QueryResult:
@@ -237,30 +266,31 @@ class QueryEngine:
         if n:
             sorted_df = sorted_df.head(int(n))
         return QueryResult(
-            operation="sort", success=True, table_result=sorted_df, columns_used=[col] + used,
+            operation="sort", success=True, table_result=sorted_df,
+            columns_used=[col] + used,
             explanation=f"Sorted rows by '{col}' ({'ascending' if ascending else 'descending'})."
                         + (f" Limited to top {n}." if n else ""),
         )
 
-    def _op_topn(self, intent: dict) -> QueryResult:
+    def _op_ranked(self, intent: dict, ascending: bool) -> QueryResult:
+        """Shared handler for topn/bottomn to avoid duplication."""
         col = self._numeric_col(intent.get("column"))
         n = int(intent.get("n") or 5)
         filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
-        top = filtered.sort_values(by=col, ascending=False).head(n) if col else filtered.head(n)
+        ranked = filtered.sort_values(by=col, ascending=ascending).head(n) if col else filtered.head(n)
+        label = "bottom" if ascending else "top"
         return QueryResult(
-            operation="topn", success=True, table_result=top, columns_used=[col] + used,
-            explanation=f"Sorted by '{col}' descending and took the top {n} rows.",
+            operation=f"{label}n", success=True, table_result=ranked,
+            columns_used=[col] + used,
+            explanation=f"Sorted by '{col}' {'ascending' if ascending else 'descending'} "
+                        f"and took the {label} {n} rows.",
         )
 
+    def _op_topn(self, intent: dict) -> QueryResult:
+        return self._op_ranked(intent, ascending=False)
+
     def _op_bottomn(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        n = int(intent.get("n") or 5)
-        filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
-        bottom = filtered.sort_values(by=col, ascending=True).head(n) if col else filtered.head(n)
-        return QueryResult(
-            operation="bottomn", success=True, table_result=bottom, columns_used=[col] + used,
-            explanation=f"Sorted by '{col}' ascending and took the bottom {n} rows.",
-        )
+        return self._op_ranked(intent, ascending=True)
 
     def _op_groupby(self, intent: dict) -> QueryResult:
         group_col = self._resolve(
@@ -272,7 +302,10 @@ class QueryEngine:
         filtered, used = self._apply_conditions(self.df, intent.get("conditions", []))
 
         if not group_col:
-            return QueryResult(operation="groupby", success=False, error="Could not determine a column to group by.")
+            return QueryResult(
+                operation="groupby", success=False,
+                error="Could not determine a column to group by.",
+            )
 
         if agg_func not in {"mean", "sum", "count", "min", "max", "median"}:
             agg_func = "mean"
@@ -300,7 +333,8 @@ class QueryEngine:
         col = self._resolve(intent.get("column"), self.schema.location_col)
         values = sorted(self.df[col].dropna().astype(str).unique().tolist()) if col else []
         return QueryResult(
-            operation="unique", success=True, table_result=pd.DataFrame({col: values}) if col else None,
+            operation="unique", success=True,
+            table_result=pd.DataFrame({col: values}) if col else None,
             scalar_result=values, columns_used=[col] if col else [],
             explanation=f"Computed df['{col}'].unique() -> {len(values)} distinct values.",
         )
@@ -309,7 +343,8 @@ class QueryEngine:
         col = self._resolve(intent.get("column"), self.schema.location_col)
         n = int(self.df[col].nunique(dropna=True)) if col else None
         return QueryResult(
-            operation="distinct_count", success=True, scalar_result=n, columns_used=[col] if col else [],
+            operation="distinct_count", success=True, scalar_result=n,
+            columns_used=[col] if col else [],
             explanation=f"Computed df['{col}'].nunique() -> {n}.",
         )
 
@@ -318,7 +353,8 @@ class QueryEngine:
         target = self.df[[col]] if col else self.df.select_dtypes(include="number")
         desc = target.describe()
         return QueryResult(
-            operation="describe", success=True, table_result=desc, columns_used=[col] if col else [],
+            operation="describe", success=True, table_result=desc,
+            columns_used=[col] if col else [],
             explanation="Computed df.describe() summary statistics.",
         )
 
@@ -374,14 +410,18 @@ def _extract_numbers_with_shared_units(q: str) -> list[float]:
     return results
 
 
-def _match_categorical_conditions(q: str, schema: DatasetSchema, df=None) -> list[dict]:
+def _match_categorical_conditions(
+    q: str, schema: DatasetSchema, df: pd.DataFrame | None = None
+) -> list[dict]:
     """Detect mentions of known categorical values (e.g. '2BHK', 'Pune')
     anywhere in the question and turn them into filter conditions, without
     hardcoding any specific column name."""
     conditions: list[dict] = []
     if df is None:
         return conditions
-    candidate_cols = [c for c in [schema.property_type_col, schema.location_col, schema.status_col] if c]
+    candidate_cols = [
+        c for c in [schema.property_type_col, schema.location_col, schema.status_col] if c
+    ]
     for col in candidate_cols:
         if col not in df.columns:
             continue
@@ -393,7 +433,30 @@ def _match_categorical_conditions(q: str, schema: DatasetSchema, df=None) -> lis
     return conditions
 
 
-def rule_based_intent(question: str, schema: DatasetSchema, df=None) -> dict:
+def merge_follow_up_conditions(
+    new_intent: dict, previous_conditions: list[dict]
+) -> dict:
+    """Merge conditions from a previous query into the new intent to
+    support conversational follow-ups like 'only those above 90 lakhs'.
+
+    Only merges if the new intent has no conditions of its own for a
+    column that the previous query already filtered on.
+    """
+    if not previous_conditions:
+        return new_intent
+
+    existing = new_intent.get("conditions", [])
+    existing_cols = {c.get("column") for c in existing}
+    for cond in previous_conditions:
+        if cond.get("column") not in existing_cols:
+            existing.append(cond)
+    new_intent["conditions"] = existing
+    return new_intent
+
+
+def rule_based_intent(
+    question: str, schema: DatasetSchema, df: pd.DataFrame | None = None
+) -> dict[str, Any]:
     """A conservative keyword-based fallback so the app still works
     without an LLM (or if the Gemini call fails / quota is exceeded).
     """

@@ -4,17 +4,17 @@ gemini_helper.py
 ALL calls to Google Gemini live here, and ONLY here. Gemini is used for
 exactly three things in this application:
 
-1. `understand_intent`   - turn a natural-language question into a
+1. `understand_intent`   – turn a natural-language question into a
                             structured JSON "intent" dict (operation,
                             column, filters, ...). Gemini never computes
                             the answer itself.
-2. `summarize_result`     - turn an already-computed pandas result into
+2. `summarize_result`     – turn an already-computed pandas result into
                             a friendly natural-language sentence.
-3. `generate_insights`    - turn already-computed pandas statistics into
+3. `generate_insights`    – turn already-computed pandas statistics into
                             friendly bullet-point insights.
 
 Gemini is never shown the full raw dataset and is never asked to
-"answer" a question directly - it only ever sees already-computed
+"answer" a question directly – it only ever sees already-computed
 numbers/tables and rephrases them, or it maps a question to an
 operation name from a fixed vocabulary. This is what prevents
 hallucination.
@@ -23,12 +23,18 @@ hallucination.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-from functools import lru_cache
+import time
 from typing import Any
 
-import pandas as pd
+from config import (
+    GEMINI_MAX_RETRIES,
+    GEMINI_MODEL,
+    GEMINI_TIMEOUT_SECONDS,
+    OPERATIONS,
+)
 
 try:
     import google.generativeai as genai
@@ -36,14 +42,28 @@ try:
 except ImportError:  # pragma: no cover
     _GENAI_AVAILABLE = False
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+logger = logging.getLogger(__name__)
 
-_ALLOWED_OPS = [
-    "count", "sum", "average", "min", "max", "filter", "sort", "groupby",
-    "topn", "bottomn", "between", "greater_than", "less_than", "unique",
-    "distinct_count", "describe", "list",
-]
+_ALLOWED_OPS = sorted(OPERATIONS)
 
+# ---------------------------------------------------------------------------
+# SDK configuration guard – configure only once per process
+# ---------------------------------------------------------------------------
+_SDK_CONFIGURED: bool = False
+
+
+def _ensure_sdk_configured(api_key: str) -> None:
+    """Configure the Gemini SDK exactly once."""
+    global _SDK_CONFIGURED
+    if not _SDK_CONFIGURED:
+        genai.configure(api_key=api_key)
+        _SDK_CONFIGURED = True
+        logger.info("Gemini SDK configured (model=%s)", GEMINI_MODEL)
+
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
 _INTENT_SYSTEM_PROMPT = """You are a strict intent-classification engine for a
 data analysis tool. You NEVER answer questions yourself and you NEVER invent
 numbers. Your only job is to map a user's natural language question about a
@@ -99,17 +119,45 @@ insight per line, no markdown bullets needed (the UI adds its own bullets).
 
 
 class GeminiUnavailableError(Exception):
+    """Raised when the Gemini SDK or API key is not available."""
     pass
 
 
 def _get_client():
+    """Return a configured GenerativeModel, configuring the SDK once."""
     if not _GENAI_AVAILABLE:
         raise GeminiUnavailableError("google-generativeai package is not installed.")
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise GeminiUnavailableError("GEMINI_API_KEY is not set in the environment.")
-    genai.configure(api_key=api_key)
+    _ensure_sdk_configured(api_key)
     return genai.GenerativeModel(GEMINI_MODEL)
+
+
+def _call_with_retry(client, prompt: str) -> str:
+    """Call Gemini with timeout awareness and retry logic."""
+    last_exc: Exception | None = None
+    for attempt in range(1, GEMINI_MAX_RETRIES + 1):
+        try:
+            t0 = time.time()
+            response = client.generate_content(
+                prompt,
+                request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
+            )
+            latency = time.time() - t0
+            text = (response.text or "").strip()
+            logger.info(
+                "Gemini call OK (attempt=%d, latency=%.2fs, chars=%d)",
+                attempt, latency, len(text),
+            )
+            return text
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "Gemini call failed (attempt=%d/%d): %s",
+                attempt, GEMINI_MAX_RETRIES, exc,
+            )
+    raise last_exc  # type: ignore[misc]
 
 
 def _extract_json(text: str) -> dict:
@@ -124,24 +172,49 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
+def _validate_intent(intent: dict) -> dict:
+    """Sanitize and validate a parsed intent dict before execution.
+
+    - Ensures `operation` is in the allowed set.
+    - Strips any unexpected top-level keys.
+    """
+    op = (intent.get("operation") or "").lower().strip()
+    if op not in OPERATIONS:
+        raise ValueError(
+            f"Gemini returned invalid operation '{op}'. "
+            f"Allowed: {sorted(OPERATIONS)}"
+        )
+    intent["operation"] = op
+    # Allow only known keys through
+    allowed_keys = {
+        "operation", "column", "group_by", "agg_column", "agg_func",
+        "value", "value2", "n", "ascending", "conditions",
+    }
+    return {k: v for k, v in intent.items() if k in allowed_keys}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 def understand_intent(question: str, columns: list[str], schema_dict: dict) -> dict:
     """Ask Gemini to classify the question into a structured intent dict.
 
     Raises GeminiUnavailableError if the API/key isn't configured, and
-    ValueError if Gemini's response can't be parsed as valid JSON - in
+    ValueError if Gemini's response can't be parsed as valid JSON – in
     both cases the caller should fall back to the rule-based parser in
     query_engine.py.
     """
     client = _get_client()
     prompt = _INTENT_SYSTEM_PROMPT.format(
-        columns=json.dumps(columns), schema=json.dumps(schema_dict), ops=json.dumps(_ALLOWED_OPS)
+        columns=json.dumps(columns),
+        schema=json.dumps(schema_dict),
+        ops=json.dumps(_ALLOWED_OPS),
     )
     full_prompt = f"{prompt}\n\nUser question: {question}\nJSON:"
-    response = client.generate_content(full_prompt)
-    raw_text = (response.text or "").strip()
+    raw_text = _call_with_retry(client, full_prompt)
     intent = _extract_json(raw_text)
-    if "operation" not in intent:
-        raise ValueError("Gemini response did not include an 'operation' field.")
+    intent = _validate_intent(intent)
+    logger.info("Parsed intent: operation=%s", intent.get("operation"))
     return intent
 
 
@@ -155,19 +228,21 @@ def summarize_result(question: str, operation: str, result_payload: dict) -> str
         f"Computed result (ground truth, do not alter numbers): "
         f"{json.dumps(result_payload, default=str)}\n\nAnswer:"
     )
-    response = client.generate_content(prompt)
-    return (response.text or "").strip()
+    return _call_with_retry(client, prompt)
 
 
 def generate_insights(stats_lines: list[str]) -> list[str]:
     """Ask Gemini to rewrite pre-computed stat strings as polished insights."""
     client = _get_client()
-    prompt = f"{_INSIGHTS_SYSTEM_PROMPT}\n\nFacts:\n" + "\n".join(f"- {s}" for s in stats_lines)
-    response = client.generate_content(prompt)
-    text = (response.text or "").strip()
+    prompt = (
+        f"{_INSIGHTS_SYSTEM_PROMPT}\n\nFacts:\n"
+        + "\n".join(f"- {s}" for s in stats_lines)
+    )
+    text = _call_with_retry(client, prompt)
     lines = [ln.strip("-* \t") for ln in text.splitlines() if ln.strip()]
     return lines or stats_lines
 
 
 def is_configured() -> bool:
+    """Check if the Gemini SDK and API key are available."""
     return _GENAI_AVAILABLE and bool(os.environ.get("GEMINI_API_KEY"))

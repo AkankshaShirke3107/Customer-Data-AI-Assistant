@@ -17,12 +17,18 @@ column names (e.g. "Price", "City", "Lead Status", "Phone").
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE_BYTES
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
 # Keyword dictionaries used for semantic column classification.
@@ -43,13 +49,14 @@ ID_KEYWORDS = ["id", "uuid", "code", "ref"]
 
 @dataclass
 class ColumnProfile:
+    """Profile of a single column in the uploaded dataset."""
     name: str
     dtype: str
     missing: int
     missing_pct: float
     unique_count: int
     role: str  # semantic role assigned
-    sample_values: list = field(default_factory=list)
+    sample_values: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -87,8 +94,32 @@ class DatasetSchema:
 
 
 def _matches_any(col_name: str, keywords: list[str]) -> bool:
+    """Check if a column name matches any of the keywords."""
     lowered = col_name.lower()
     return any(kw in lowered for kw in keywords)
+
+
+def validate_upload(file) -> None:
+    """Validate an uploaded file before loading.
+
+    Raises ValueError with a user-friendly message on failure.
+    """
+    name = getattr(file, "name", "")
+    ext = os.path.splitext(name)[1].lower() if name else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file type '{ext}'. Please upload an Excel file "
+            f"({', '.join(sorted(ALLOWED_EXTENSIONS))})."
+        )
+
+    size = getattr(file, "size", 0)
+    if size > MAX_UPLOAD_SIZE_BYTES:
+        max_mb = MAX_UPLOAD_SIZE_BYTES / (1024 * 1024)
+        actual_mb = size / (1024 * 1024)
+        raise ValueError(
+            f"File is too large ({actual_mb:.1f} MB). "
+            f"Maximum allowed size is {max_mb:.0f} MB."
+        )
 
 
 def load_dataframe(file) -> pd.DataFrame:
@@ -99,7 +130,7 @@ def load_dataframe(file) -> pd.DataFrame:
     """
     try:
         df = pd.read_excel(file, engine="openpyxl")
-    except Exception as exc:  # noqa: BLE001 - we want a friendly wrapper
+    except Exception as exc:  # noqa: BLE001 – we want a friendly wrapper
         raise ValueError(f"Could not read the Excel file: {exc}") from exc
 
     if df.empty:
@@ -112,6 +143,10 @@ def load_dataframe(file) -> pd.DataFrame:
     # Normalize column names: strip whitespace
     df.columns = [str(c).strip() for c in df.columns]
 
+    logger.info(
+        "Loaded dataset: %d rows × %d cols (%s)",
+        len(df), df.shape[1], ", ".join(df.columns[:5]),
+    )
     return df
 
 
@@ -202,6 +237,11 @@ def detect_schema(df: pd.DataFrame) -> DatasetSchema:
         if c and c not in schema.categorical_cols:
             schema.categorical_cols.append(c)
 
+    logger.info(
+        "Schema detected: name=%s, budget=%s, location=%s, type=%s, status=%s",
+        schema.name_col, schema.primary_budget_col, schema.location_col,
+        schema.property_type_col, schema.status_col,
+    )
     return schema
 
 

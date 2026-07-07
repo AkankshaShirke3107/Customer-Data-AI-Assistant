@@ -1,12 +1,39 @@
+# ---------- Python ----------
 __pycache__/
-*.pyc
-.env
-.venv
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ---------- Virtual environments ----------
+.venv/
 venv/
 ENV/
-env.bak/
-venv.bak/
-.DS_Store
+env/
+
+# ---------- IDE ----------
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
+
+# ---------- Environment / Secrets ----------
+.env
+.env.local
+.env.*.local
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Streamlit ----------
+.streamlit/secrets.toml
+
+# ---------- Logs ----------
+*.log
+logs/
