@@ -39,6 +39,23 @@ If Gemini is unavailable, rate-limited, or unconfigured, the application continu
 
 ---
 
+## UI Preview
+
+<p align="center">
+  <img src="screenshot-welcome.png" alt="Welcome Screen" width="48%">
+  <img src="screenshot-dashboard.png" alt="Dashboard View" width="48%">
+</p>
+<p align="center">
+  <img src="screenshot-chat-query.png" alt="Natural Language Querying" width="48%">
+  <img src="screenshot-charts-1.png" alt="Visual Profiling" width="48%">
+</p>
+<p align="center">
+  <img src="screenshot-charts-2.png" alt="Advanced Charts" width="48%">
+  <img src="screenshot-download.png" alt="One-Click Export" width="48%">
+</p>
+
+---
+
 ## Key Features
 
 | Feature | Description | Status |
