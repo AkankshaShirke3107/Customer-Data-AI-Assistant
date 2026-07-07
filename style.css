@@ -35,8 +35,8 @@
     --transition:  all .2s cubic-bezier(.4,0,.2,1);
 }
 
-*, html, body, .stApp, p, span, label, li, td, th, h1, h2, h3, h4, h5, h6, input, textarea, button, select, div[data-testid="stChatMessage"] p {
-    font-family: var(--font) !important;
+html, body, [class*="st-"], .stApp, p, label, li, td, th, h1, h2, h3, h4, h5, h6, input, textarea, button, select, div[data-testid="stChatMessage"] p {
+    font-family: var(--font);
 }
 code, pre, .stCode {
     font-family: var(--mono) !important;
