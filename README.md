@@ -37,20 +37,16 @@ If Gemini is unavailable, rate-limited, or unconfigured, the application continu
 
 ---
 
-## UI Preview
+## Screenshots
 
-<p align="center">
-  <img src="screenshot-welcome.png" alt="Welcome Screen" width="48%">
-  <img src="screenshot-dashboard.png" alt="Dashboard View" width="48%">
-</p>
-<p align="center">
-  <img src="screenshot-chat-query.png" alt="Natural Language Querying" width="48%">
-  <img src="screenshot-charts-1.png" alt="Visual Profiling" width="48%">
-</p>
-<p align="center">
-  <img src="screenshot-charts-2.png" alt="Advanced Charts" width="48%">
-  <img src="screenshot-download.png" alt="One-Click Export" width="48%">
-</p>
+| View | Description |
+|:-----|:------------|
+| <img src="screenshots/hero.png" width="400"> | Landing page with hero section and status badges |
+| <img src="screenshots/dashboard.png" width="400"> | KPI cards and key statistics after dataset upload |
+| <img src="screenshots/chat.png" width="400"> | Chat interface with user/AI messages and confidence badge |
+| <img src="screenshots/pipeline.png" width="400"> | Execution details panel showing the audit trail timeline |
+| <img src="screenshots/charts.png" width="400"> | Auto-generated Plotly visualization with dark theme |
+| <img src="screenshots/insights.png" width="400"> | AI-generated insights section |
 
 ---
 
