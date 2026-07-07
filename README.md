@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-FF4B4B.svg?logo=streamlit&logoColor=white)](https://streamlit.io)
 [![Pandas](https://img.shields.io/badge/Pandas-2.2+-150458.svg?logo=pandas&logoColor=white)](https://pandas.pydata.org)
-[![Gemini](https://img.shields.io/badge/Gemini-2.0_Flash-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev)
+[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -119,7 +119,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Frontend** | Streamlit | Rapid UI development, native chat components |
 | **Data Processing** | Pandas, NumPy | Deterministic data manipulation and math |
-| **Language Model** | Google Gemini 2.0 Flash | Intent classification & result summarization |
+| **Language Model** | Google Gemini 2.5 Flash | Intent classification & result summarization |
 | **Visualizations** | Plotly | Interactive, responsive charting |
 | **Excel Handling** | OpenPyXL | `.xlsx` parsing |
 | **Configuration** | Python-dotenv | Environment variable management |
@@ -181,7 +181,7 @@ Add your API key to the `.env` file:
 ```ini
 GEMINI_API_KEY="your_api_key_here"
 # Optional overrides:
-# GEMINI_MODEL="gemini-2.0-flash"
+# GEMINI_MODEL="gemini-2.5-flash"
 # LOG_LEVEL="INFO"
 # MAX_UPLOAD_SIZE_MB="50"
 ```
@@ -262,7 +262,7 @@ This project was built to satisfy and exceed all internship assignment requireme
 | Requirement | Implementation Detail | Status |
 | :--- | :--- | :---: |
 | **Excel Upload** | Secure, server-side validated upload via `utils.py` | ✅ |
-| **Natural Language Questions** | Handled via `gemini_helper.py` integrating Gemini 2.0 | ✅ |
+| **Natural Language Questions** | Handled via `gemini_helper.py` integrating Gemini 2.5 | ✅ |
 | **Accurate Pandas Execution** | 17 distinct analytical operations coded in `query_engine.py` | ✅ |
 | **Gemini for Intent/Summarization** | Strict system prompts enforce JSON-only intent output | ✅ |
 | **No AI Hallucination** | Achieved via pipeline decoupling; proven by Explainability panel | ✅ |

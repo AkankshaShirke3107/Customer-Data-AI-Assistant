@@ -26,7 +26,7 @@ MAX_CHAT_HISTORY: int = 50  # oldest turns are evicted when this is exceeded
 # ---------------------------------------------------------------------------
 # Gemini API
 # ---------------------------------------------------------------------------
-GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_TIMEOUT_SECONDS: int = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "30"))
 GEMINI_MAX_RETRIES: int = 2
 CACHE_TTL_SECONDS: int = 3600  # 1 hour for Gemini response caches
