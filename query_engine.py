@@ -91,7 +91,7 @@ class QueryEngine:
                     else:
                         out = out[series.astype(str).str.lower() == str(val).lower()]
                 elif op in {"contains", "like"}:
-                    out = out[series.astype(str).str.lower().str.contains(str(val).lower(), na=False)]
+                    out = out[series.astype(str).str.lower().str.contains(str(val).lower(), regex=False, na=False)]
                 elif op in {"gt", ">"}:
                     out = out[pd.to_numeric(series, errors="coerce") > float(val)]
                 elif op in {"gte", ">="}:
