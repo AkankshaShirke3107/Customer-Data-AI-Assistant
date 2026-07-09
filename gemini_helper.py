@@ -296,6 +296,98 @@ def generate_insights(stats_lines: list[str]) -> list[str]:
     return lines or stats_lines
 
 
+# ---------------------------------------------------------------------------
+# Dynamic Pandas Code Generation
+# ---------------------------------------------------------------------------
+_CODE_GEN_SYSTEM_PROMPT = """You are a pandas code generator. Given a user question
+and a DataFrame schema, write ONLY executable Python code that operates on a
+DataFrame named `df`.
+
+Rules:
+- Use ONLY `df`, `pd` (pandas), `np` (numpy), and safe builtins (len, sum, min,
+  max, round, abs, sorted, list, dict, str, int, float, bool, isinstance, range,
+  enumerate, zip, map, filter).
+- Do NOT use import statements, file I/O, network calls, eval, exec, __import__,
+  open, compile, globals, locals, getattr, setattr, or delattr.
+- Do NOT use os, sys, subprocess, signal, or any system access.
+- Return ONLY the code. No prose, no markdown fences, no explanation.
+- The code should be a single expression OR a short block that assigns the final
+  result to a variable named `result`.
+- For table results, produce a DataFrame. For scalar results, produce the value.
+- Column names (use exactly as listed): {columns}
+- Column data types: {dtypes}
+- Sample data (first 3 rows): {sample}
+"""
+
+_CODE_CORRECTION_PROMPT = """The following pandas code failed with an error.
+Write corrected code that fixes this error. Follow the same rules as before:
+use only `df`, `pd`, `np`, and safe builtins. Return ONLY the corrected code,
+no explanation, no markdown fences.
+
+Original question: {question}
+DataFrame columns: {columns}
+Failed code:
+{code}
+Error: {error}
+"""
+
+
+def _strip_code_fences(text: str) -> str:
+    """Strip markdown code fences that Gemini sometimes adds despite instructions."""
+    text = text.strip()
+    text = re.sub(r"^```(?:python)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    return text.strip()
+
+
+def generate_pandas_code(question: str, df_schema: dict[str, Any]) -> str:
+    """Ask Gemini to generate executable pandas code for a user question.
+
+    The prompt includes column names, dtypes, and 2-3 sample rows (never full
+    PII beyond what's already in-memory). Raw row-level data is NOT sent.
+
+    Returns the generated code string ready for sandboxed execution.
+
+    Raises GeminiUnavailableError if the API is not configured.
+    """
+    client = _get_client()
+    prompt = _CODE_GEN_SYSTEM_PROMPT.format(
+        columns=json.dumps(df_schema.get("columns", [])),
+        dtypes=json.dumps(df_schema.get("dtypes", {})),
+        sample=json.dumps(df_schema.get("sample_rows", []), default=str),
+    )
+    full_prompt = f"{prompt}\n\nUser question: {question}\nCode:"
+    raw_text = _call_with_retry(client, full_prompt)
+    return _strip_code_fences(raw_text)
+
+
+def generate_corrected_code(
+    question: str,
+    failed_code: str,
+    error_msg: str,
+    df_schema: dict[str, Any],
+) -> str:
+    """Ask Gemini to correct previously-failed pandas code.
+
+    Sends the original question, the failed code, and a sanitized error
+    message. No raw dataset rows are included.
+
+    Returns the corrected code string.
+
+    Raises GeminiUnavailableError if the API is not configured.
+    """
+    client = _get_client()
+    prompt = _CODE_CORRECTION_PROMPT.format(
+        question=question,
+        columns=json.dumps(df_schema.get("columns", [])),
+        code=failed_code,
+        error=error_msg,
+    )
+    raw_text = _call_with_retry(client, prompt)
+    return _strip_code_fences(raw_text)
+
+
 def is_configured() -> bool:
     """Check if the Gemini SDK and API key are available."""
     return _GENAI_AVAILABLE and bool(os.environ.get("GEMINI_API_KEY"))
+

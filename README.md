@@ -244,6 +244,30 @@ result   = filtered[pd.to_numeric(filtered["Budget (INR)"], errors="coerce") > 9
 
 The engine records execution metadata: rows scanned, rows matched, filters applied, columns used, and wall-clock execution time in milliseconds. This data powers the audit trail displayed in the UI.
 
+### 1. Intent Classification
+
+If the Google Gemini API is configured, the question is passed to Gemini with the dataset schema (column names and types). Gemini is prompted to return a structured JSON intent using one of the predefined operations.
+
+If Gemini is unavailable, the system falls back to a rule-based parser that uses keyword and regex matching to determine the intent.
+
+### 2. Fixed-Operation Execution (Fast Path)
+
+The parsed intent is passed to the `QueryEngine`, which applies any requested filters and executes the specific pandas handler (e.g., `_op_average`, `_op_groupby`). This path is deterministic, heavily tested, and extremely fast.
+
+### 3. Dynamic Code Generation (Fallback Path)
+
+If the intent parser cannot confidently match the question to one of the 20 fixed operations, the system falls back to a dynamic code generation pipeline:
+
+1. **Generation:** Gemini is prompted to write a single Pandas expression or short block of code to answer the question, using only the provided DataFrame schema.
+2. **Sandboxed Execution:** The generated code is executed in a restricted sandbox (`execute_sandboxed`) with a strict thread-based timeout (5 seconds) and a whitelisted set of builtins (no imports, no file I/O, no network calls). The original DataFrame is safely copied before execution.
+3. **Self-Correction:** If the code fails (e.g., `KeyError` on a hallucinated column name, or a `SyntaxError`), the error is fed back to Gemini for up to 2 automatic correction retries. 
+
+This enables the application to answer complex, compound queries (e.g., *"Average budget of 2BHK buyers in Pune, grouped by contact status"*) that exceed the capabilities of the fixed operations, without compromising application stability.
+
+---
+
+## Security and Privacy
+
 ### 4 · Summarization
 
 The computed result — a scalar value or a preview of the filtered DataFrame — is passed to Gemini with explicit instructions to phrase it naturally without altering any values. If Gemini is unavailable, a template-based summary is generated locally from the result metadata.

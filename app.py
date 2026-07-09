@@ -21,9 +21,11 @@ import gemini_helper
 from charts import CHART_CONFIG
 from config import (
     CACHE_TTL_SECONDS, DATA_PREVIEW_ROWS, LOG_FORMAT, LOG_LEVEL,
-    MAX_CHAT_HISTORY, TABLE_DISPLAY_ROWS,
+    MAX_CHAT_HISTORY, TABLE_DISPLAY_ROWS, ENABLE_DYNAMIC_CODE_GEN,
 )
-from query_engine import QueryEngine, merge_follow_up_conditions, rule_based_intent, validate_chain_intent
+from query_engine import (
+    QueryEngine, merge_follow_up_conditions, rule_based_intent, validate_chain_intent, run_dynamic_query
+)
 from utils import detect_schema, load_dataframe, profile_dataset, rule_based_insights, validate_upload
 
 load_dotenv()
@@ -485,6 +487,13 @@ with col_main:
                     )
                     st.caption(_e(_st.explanation))
 
+        # Dynamic Code execution display
+        if _result.execution_path == "dynamic" and _result.dynamic_code:
+            with st.expander("⚡ Dynamic Code Execution", expanded=False):
+                st.code(_result.dynamic_code, language="python")
+                if _result.dynamic_retry_count > 0:
+                    st.caption(f"Self-corrected after {_result.dynamic_retry_count} retry(s)")
+
         # Table result
         if _result.success and _result.table_result is not None and not _result.table_result.empty:
             st.dataframe(_result.table_result.head(TABLE_DISPLAY_ROWS), use_container_width=True)
@@ -585,6 +594,13 @@ with col_main:
                     _result = _engine.execute(_intent)
             else:
                 _result  = _engine.execute(_intent)
+
+            # Dynamic code generation fallback
+            if (not _result.success
+                and ENABLE_DYNAMIC_CODE_GEN
+                and gemini_helper.is_configured()
+                and "Unrecognized operation" in (_result.error or "")):
+                _result = run_dynamic_query(_final_q, df, schema)
 
             _summary      = None
             _used_gem_sum = False

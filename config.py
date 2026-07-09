@@ -50,6 +50,14 @@ OPERATIONS: set[str] = {
 MAX_QUERY_STEPS: int = 5  # upper bound on chained query steps
 
 # ---------------------------------------------------------------------------
+# Dynamic code generation (Gemini-powered fallback for compound queries)
+# ---------------------------------------------------------------------------
+ENABLE_DYNAMIC_CODE_GEN: bool = True   # set False to disable the dynamic path entirely
+SANDBOX_TIMEOUT_SECONDS: int = 5       # hard cap per execution attempt
+DYNAMIC_CODE_MAX_RETRIES: int = 2      # retries after first failure (3 total attempts)
+DYNAMIC_RESULT_MAX_ROWS: int = 50      # cap on rows returned by dynamic queries
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
