@@ -706,6 +706,10 @@ with col_main:
                 else None
             )
 
+            # Cap the dataframe memory footprint for historical turns
+            if _result.success and _result.table_result is not None:
+                _result.table_result = _result.table_result.head(TABLE_DISPLAY_ROWS).copy()
+
             st.session_state.chat_history.append({
                 "question":           _final_q,
                 "summary":            _summary,

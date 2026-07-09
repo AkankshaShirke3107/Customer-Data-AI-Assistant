@@ -40,71 +40,58 @@ def execute_sandboxed(code: str, df: pd.DataFrame, timeout: int = 5) -> dict:
     Returns:
         dict: {"success": True, "result": value} or {"success": False, "error_type": str, "error_msg": str, "code": code}
     """
-    # Defense-in-depth: reject code containing known sandbox escape patterns.
-    # The restricted builtins are the primary barrier; this is the secondary check.
-    _BLOCKED_PATTERNS = [
-        "__class__", "__bases__", "__subclasses__", "__globals__", "__code__",
-        "__import__", "breakpoint", "compile(", "exec(", "eval(",
-        "getattr", "setattr", "delattr", "globals(", "locals(",
-        "open(", "os.", "sys.", "subprocess", "signal",
-    ]
-    code_lower = code.lower()
-    for pattern in _BLOCKED_PATTERNS:
-        if pattern.lower() in code_lower:
-            return {
-                "success": False,
-                "error_type": "SecurityError",
-                "error_msg": f"Code contains blocked pattern: '{pattern}'",
-                "code": code,
-            }
-
-    # Safe builtins for pandas manipulation
-    safe_builtins = {
-        "len": len, "sum": sum, "min": min, "max": max, "round": round, "abs": abs,
-        "sorted": sorted, "list": list, "dict": dict, "str": str, "int": int,
-        "float": float, "bool": bool, "True": True, "False": False, "None": None,
-        "isinstance": isinstance, "range": range, "enumerate": enumerate,
-        "zip": zip, "map": map, "filter": filter, "print": lambda *args, **kwargs: None,
-    }
+    # 1. AST-based Security Validation
+    import ast
     
-    # Restricted execution environment
-    env = {
-        "df": df.copy(),
-        "pd": pd,
-        "np": np,
-        "__builtins__": safe_builtins,
-    }
+    class SecurityScanner(ast.NodeVisitor):
+        def visit_Import(self, node):
+            raise ValueError(f"Imports are blocked (found '{node.names[0].name}')")
+        
+        def visit_ImportFrom(self, node):
+            raise ValueError(f"Imports are blocked (found '{node.module}')")
+            
+        def visit_Call(self, node):
+            # block eval, exec, getattr, setattr, globals, locals, open, compile
+            if isinstance(node.func, ast.Name):
+                blocked = {"eval", "exec", "getattr", "setattr", "delattr", "globals", "locals", "open", "compile", "__import__"}
+                if node.func.id in blocked:
+                    raise ValueError(f"Function '{node.func.id}' is blocked")
+            # block df.query and df.eval
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr in {"query", "eval", "applymap", "apply"}:
+                    raise ValueError(f"Method '{node.func.attr}' is blocked for security")
+            self.generic_visit(node)
+            
+        def visit_Attribute(self, node):
+            if node.attr.startswith("__"):
+                raise ValueError(f"Access to dunder attribute '{node.attr}' is blocked")
+            self.generic_visit(node)
+            
+    try:
+        tree = ast.parse(code)
+        SecurityScanner().visit(tree)
+    except Exception as e:
+        return {
+            "success": False,
+            "error_type": "SecurityError",
+            "error_msg": str(e),
+            "code": code
+        }
 
-    result_container = {}
-    exception_container = {}
+    import multiprocessing
+    
+    manager = multiprocessing.Manager()
+    result_container = manager.dict()
+    
+    # Process execution
+    p = multiprocessing.Process(target=_sandbox_worker, args=(code, df, result_container))
+    p.daemon = True
+    p.start()
+    p.join(timeout)
 
-    def _worker():
-        try:
-            # Try evaluating as a single expression first
-            try:
-                # Compile to catch syntax errors immediately
-                compiled_expr = compile(code, "<string>", "eval")
-                res = eval(compiled_expr, env)
-                result_container["value"] = res
-            except SyntaxError:
-                # If it's a statement (e.g. assignment), use exec
-                compiled_stmt = compile(code, "<string>", "exec")
-                exec(compiled_stmt, env)
-                # Look for a variable named 'result', otherwise try to extract a modified df
-                if "result" in env:
-                    result_container["value"] = env["result"]
-                else:
-                    result_container["value"] = env.get("df")
-        except Exception as e:
-            exception_container["exc"] = e
-
-    # Run in a thread for timeout control
-    thread = threading.Thread(target=_worker)
-    thread.daemon = True
-    thread.start()
-    thread.join(timeout)
-
-    if thread.is_alive():
+    if p.is_alive():
+        p.terminate()
+        p.join()
         return {
             "success": False,
             "error_type": "TimeoutError",
@@ -112,8 +99,8 @@ def execute_sandboxed(code: str, df: pd.DataFrame, timeout: int = 5) -> dict:
             "code": code
         }
 
-    if "exc" in exception_container:
-        e = exception_container["exc"]
+    if "exc" in result_container:
+        e = result_container["exc"]
         return {
             "success": False,
             "error_type": type(e).__name__,
@@ -143,6 +130,39 @@ def execute_sandboxed(code: str, df: pd.DataFrame, timeout: int = 5) -> dict:
         val = val.item()
 
     return {"success": True, "result": val}
+
+def _sandbox_worker(code: str, df: pd.DataFrame, result_container: dict):
+    """Top-level worker function for multiprocessing picklability."""
+    safe_builtins = {
+        "len": len, "sum": sum, "min": min, "max": max, "round": round, "abs": abs,
+        "sorted": sorted, "list": list, "dict": dict, "str": str, "int": int,
+        "float": float, "bool": bool, "True": True, "False": False, "None": None,
+        "isinstance": isinstance, "range": range, "enumerate": enumerate,
+        "zip": zip, "map": map, "filter": filter, "print": lambda *args, **kwargs: None,
+    }
+    
+    env = {
+        "df": df.copy(),
+        "pd": pd,
+        "np": np,
+        "__builtins__": safe_builtins,
+    }
+    
+    try:
+        try:
+            compiled_expr = compile(code, "<string>", "eval")
+            res = eval(compiled_expr, env)
+            result_container["value"] = res
+        except SyntaxError:
+            compiled_stmt = compile(code, "<string>", "exec")
+            exec(compiled_stmt, env)
+            if "result" in env:
+                result_container["value"] = env["result"]
+            else:
+                result_container["value"] = env.get("df")
+    except Exception as e:
+        result_container["exc"] = e
+
 
 
 def run_dynamic_query(
