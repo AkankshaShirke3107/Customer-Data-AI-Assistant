@@ -194,62 +194,16 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _validate_single_intent(intent: dict) -> dict:
-    """Sanitize and validate a single-operation intent dict.
-
-    - Ensures `operation` is in the allowed set.
-    - Strips any unexpected top-level keys.
-    """
-    op = (intent.get("operation") or "").lower().strip()
-    if op not in OPERATIONS:
-        raise ValueError(
-            f"Gemini returned invalid operation '{op}'. "
-            f"Allowed: {sorted(OPERATIONS)}"
-        )
-    intent["operation"] = op
-    # Allow only known keys through
-    allowed_keys = {
-        "operation", "column", "group_by", "agg_column", "agg_func",
-        "value", "value2", "n", "ascending", "conditions",
-    }
-    return {k: v for k, v in intent.items() if k in allowed_keys}
-
-
-def _validate_intent(intent: dict) -> dict:
-    """Validate an intent dict, handling both single-operation and
-    multi-step (``{"steps": [...]}``)) shapes.
-
-    For multi-step intents each step is validated individually.
-    Returns the validated intent (same top-level shape as the input).
-    """
-    if "steps" in intent:
-        steps = intent["steps"]
-        if not isinstance(steps, list) or not steps:
-            raise ValueError("'steps' must be a non-empty list.")
-        if len(steps) > MAX_QUERY_STEPS:
-            raise ValueError(
-                f"Too many steps ({len(steps)}). "
-                f"Maximum: {MAX_QUERY_STEPS}."
-            )
-        validated_steps = []
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict):
-                raise ValueError(f"Step {i + 1} is not a valid object.")
-            try:
-                validated_steps.append(_validate_single_intent(step))
-            except ValueError as exc:
-                raise ValueError(
-                    f"Step {i + 1} validation failed: {exc}"
-                ) from exc
-        return {"steps": validated_steps}
-    return _validate_single_intent(intent)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def understand_intent(question: str, columns: list[str], schema_dict: dict) -> dict:
-    """Ask Gemini to classify the question into a structured intent dict.
+from models import RootIntentModel
+from pydantic import ValidationError
+
+def understand_intent(question: str, columns: list[str], schema_dict: dict) -> RootIntentModel:
+    """Ask Gemini to classify the question into a structured intent model.
 
     Raises GeminiUnavailableError if the API/key isn't configured, and
     ValueError if Gemini's response can't be parsed as valid JSON – in
@@ -257,18 +211,46 @@ def understand_intent(question: str, columns: list[str], schema_dict: dict) -> d
     query_engine.py.
     """
     client = _get_client()
-    prompt = _INTENT_SYSTEM_PROMPT.format(
+    base_prompt = _INTENT_SYSTEM_PROMPT.format(
         columns=json.dumps(columns),
         schema=json.dumps(schema_dict),
         ops=json.dumps(_ALLOWED_OPS),
         max_steps=MAX_QUERY_STEPS,
     )
-    full_prompt = f"{prompt}\n\nUser question: {question}\nJSON:"
-    raw_text = _call_with_retry(client, full_prompt)
-    intent = _extract_json(raw_text)
-    intent = _validate_intent(intent)
-    logger.info("Parsed intent: operation=%s", intent.get("operation"))
-    return intent
+    
+    current_prompt = f"{base_prompt}\n\nUser question: {question}\nJSON:"
+    last_exc: Exception | None = None
+
+    for attempt in range(1, GEMINI_MAX_RETRIES + 1):
+        try:
+            t0 = time.time()
+            response = client.generate_content(
+                current_prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=RootIntentModel
+                ),
+                request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
+            )
+            latency = time.time() - t0
+            text = (response.text or "").strip()
+            logger.info("Gemini call OK (attempt=%d, latency=%.2fs, chars=%d)", attempt, latency, len(text))
+            
+            parsed_json = _extract_json(text)
+            intent = RootIntentModel.model_validate(parsed_json)
+            logger.info("Parsed intent: operation=%s, steps=%d", intent.operation, len(intent.steps) if intent.steps else 0)
+            return intent
+            
+        except (json.JSONDecodeError, ValidationError) as exc:
+            last_exc = exc
+            text = text if 'text' in locals() else ""
+            logger.warning("Gemini parsing/validation failed (attempt=%d/%d): %s", attempt, GEMINI_MAX_RETRIES, exc)
+            current_prompt = f"{base_prompt}\n\nUser question: {question}\nFailed JSON Output:\n{text}\nValidation Error: {str(exc)}\nPlease fix the JSON to match the schema."
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("Gemini call failed (attempt=%d/%d): %s", attempt, GEMINI_MAX_RETRIES, exc)
+            
+    raise ValueError(f"Failed to generate valid intent after {GEMINI_MAX_RETRIES} attempts: {last_exc}") from last_exc
 
 
 def summarize_result(question: str, operation: str, result_payload: dict) -> str:
@@ -310,12 +292,14 @@ Rules:
 - Do NOT use import statements, file I/O, network calls, eval, exec, __import__,
   open, compile, globals, locals, getattr, setattr, or delattr.
 - Do NOT use os, sys, subprocess, signal, or any system access.
+- For string comparisons, you may compare against `df['<col>'].astype(str).str.strip().str.lower()` for case/whitespace-insensitive matching.
 - Return ONLY the code. No prose, no markdown fences, no explanation.
 - The code should be a single expression OR a short block that assigns the final
   result to a variable named `result`.
 - For table results, produce a DataFrame. For scalar results, produce the value.
 - Column names (use exactly as listed): {columns}
 - Column data types: {dtypes}
+- Categorical canonical values (if available, use these exact strings): {categories}
 - Sample data (first 3 rows): {sample}
 """
 
@@ -340,7 +324,7 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-def generate_pandas_code(question: str, df_schema: dict[str, Any]) -> str:
+def generate_pandas_code(question: str, df_schema: dict[str, Any], value_index: dict | None = None) -> str:
     """Ask Gemini to generate executable pandas code for a user question.
 
     The prompt includes column names, dtypes, and 2-3 sample rows (never full
@@ -351,9 +335,17 @@ def generate_pandas_code(question: str, df_schema: dict[str, Any]) -> str:
     Raises GeminiUnavailableError if the API is not configured.
     """
     client = _get_client()
+    
+    # Format canonical values for the prompt
+    canonical_vals = {}
+    if value_index:
+        for col, col_idx in value_index.items():
+            canonical_vals[col] = list(col_idx.values())
+            
     prompt = _CODE_GEN_SYSTEM_PROMPT.format(
         columns=json.dumps(df_schema.get("columns", [])),
         dtypes=json.dumps(df_schema.get("dtypes", {})),
+        categories=json.dumps(canonical_vals),
         sample=json.dumps(df_schema.get("sample_rows", []), default=str),
     )
     full_prompt = f"{prompt}\n\nUser question: {question}\nCode:"

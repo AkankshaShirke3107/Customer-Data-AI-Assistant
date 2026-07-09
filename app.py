@@ -23,6 +23,7 @@ from config import (
     CACHE_TTL_SECONDS, DATA_PREVIEW_ROWS, LOG_FORMAT, LOG_LEVEL,
     MAX_CHAT_HISTORY, TABLE_DISPLAY_ROWS, ENABLE_DYNAMIC_CODE_GEN,
 )
+from matching import build_value_index
 from query_engine import (
     QueryEngine, merge_follow_up_conditions, rule_based_intent, validate_chain_intent, run_dynamic_query
 )
@@ -54,26 +55,70 @@ def _e(text: str) -> str:
 # ── CACHED BACKEND HELPERS (unchanged) ────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def cached_load_dataframe(file_bytes: bytes) -> pd.DataFrame:
+    """Load an Excel or CSV file from raw bytes into a DataFrame.
+
+    Cached by Streamlit on ``file_bytes`` content.  Delegates to
+    ``utils.load_dataframe``.  Does not mutate ``st.session_state``.
+    """
     return load_dataframe(io.BytesIO(file_bytes))
 
 @st.cache_data(show_spinner=False)
 def cached_profile(_h: str, df: pd.DataFrame) -> dict:
+    """Return a dataset profile dict (row/column counts, per-column stats).
+
+    Keyed on the content hash ``_h`` so the profile is recomputed only
+    when the DataFrame changes.  Does not mutate ``st.session_state``.
+    """
     return profile_dataset(df)
 
 @st.cache_data(show_spinner=False)
 def cached_schema(_h: str, df: pd.DataFrame):
+    """Detect and return a ``DatasetSchema`` for the given DataFrame.
+
+    Identifies semantic column roles (budget, location, status, etc.)
+    via keyword matching.  Keyed on content hash ``_h``.
+    Does not mutate ``st.session_state``.
+    """
     return detect_schema(df)
 
 @st.cache_data(show_spinner=False)
+def cached_value_index(_h: str, df: pd.DataFrame, categorical_cols: list[str]) -> dict:
+    """Build the fuzzy-matching value index for categorical columns.
+
+    Returns ``{col: {normalized_value: canonical_value}}`` used by the
+    query engine's condition-application layer.  Keyed on content hash.
+    Does not mutate ``st.session_state``.
+    """
+    return build_value_index(df, categorical_cols)
+
+@st.cache_data(show_spinner=False)
 def cached_rule_insights(_h: str, df: pd.DataFrame, _schema) -> list[str]:
+    """Generate rule-based statistical insight strings for the dataset.
+
+    Used as input to the AI Insights panel and as a Gemini fallback.
+    Keyed on content hash.  Does not mutate ``st.session_state``.
+    """
     return rule_based_insights(df, _schema)
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def cached_gemini_insights(key: str, lines: list[str]) -> list[str]:
+    """Enhance rule-based insight lines via Gemini LLM rephrasing.
+
+    Falls back gracefully if Gemini is unavailable (caller uses raw lines).
+    Cached with a TTL of ``CACHE_TTL_SECONDS``.
+    Does not mutate ``st.session_state``.
+    """
     return gemini_helper.generate_insights(lines)
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def cached_intent(q: str, cols: list[str], schema_dict: dict) -> dict | None:
+    """Classify a user question into a structured intent via Gemini.
+
+    Returns a ``RootIntentModel`` (or dict) on success, ``None`` on any
+    exception (caller falls back to the rule-based parser).
+    Cached with a TTL of ``CACHE_TTL_SECONDS``.
+    Does not mutate ``st.session_state``.
+    """
     try:
         return gemini_helper.understand_intent(q, cols, schema_dict)
     except Exception:
@@ -81,6 +126,12 @@ def cached_intent(q: str, cols: list[str], schema_dict: dict) -> dict | None:
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def cached_summary(q: str, op: str, payload: dict) -> str | None:
+    """Ask Gemini to phrase a computed result as a natural-language summary.
+
+    Returns ``None`` on any exception (caller uses ``fallback_summary``).
+    Cached with a TTL of ``CACHE_TTL_SECONDS``.
+    Does not mutate ``st.session_state``.
+    """
     try:
         return gemini_helper.summarize_result(q, op, payload)
     except Exception:
@@ -88,11 +139,22 @@ def cached_summary(q: str, op: str, payload: dict) -> str | None:
 
 
 def _df_hash(df: pd.DataFrame) -> str:
+    """Compute a lightweight content hash for Streamlit cache keying.
+
+    Combines row count, column count, column names, dtypes, and a
+    3-row JSON sample.  Intentionally cheap — avoids hashing the full
+    DataFrame.  Does not mutate ``st.session_state``.
+    """
     sample = df.head(3).to_json()
     return f"{len(df)}_{df.shape[1]}_{hash(tuple(df.columns))}_{hash(tuple(df.dtypes))}_{hash(sample)}"
 
 
 def build_result_payload(result) -> dict:
+    """Convert a ``QueryResult`` into a JSON-safe dict for Gemini summarization.
+
+    Includes the operation name, scalar result, and an optional 15-row
+    table preview with row count.  Does not mutate ``st.session_state``.
+    """
     payload = {"operation": result.operation, "scalar_result": result.scalar_result}
     if result.table_result is not None and not result.table_result.empty:
         payload["table_preview"] = result.table_result.head(15).to_dict(orient="records")
@@ -101,6 +163,13 @@ def build_result_payload(result) -> dict:
 
 
 def fallback_summary(question: str, result) -> str:
+    """Generate a template-based summary when Gemini is unavailable.
+
+    Handles three cases: failed queries (error message), scalar results
+    (formatted value), and table results (row count).  Used as the final
+    fallback after ``cached_summary`` returns ``None``.
+    Does not mutate ``st.session_state``.
+    """
     if not result.success:
         return f"I wasn't able to process that request. {result.error}"
     if result.scalar_result is not None and (
@@ -486,6 +555,14 @@ with col_main:
                         f"{_st.execution_time_ms}ms",
                     )
                     st.caption(_e(_st.explanation))
+                    
+        # Fuzzy match corrections
+        if hasattr(_result, 'fuzzy_matches') and _result.fuzzy_matches:
+            # We only surface below-perfect confidence matches to the user
+            _corrections = [fm for fm in _result.fuzzy_matches if fm["method"] != "exact" and fm["method"] != "normalized"]
+            if _corrections:
+                for _corr in _corrections:
+                    st.caption(f"💡 Interpreted '{_e(_corr['original'])}' as '{_e(_corr['matched'])}'")
 
         # Dynamic Code execution display
         if _result.execution_path == "dynamic" and _result.dynamic_code:
@@ -534,6 +611,12 @@ with col_main:
     # ── Export Chat ────────────────────────────────────────────────────
     if st.session_state.chat_history:
         def _build_export() -> str:
+            """Compile the full chat history into a Markdown report.
+
+            Reads ``st.session_state.chat_history`` (list of turn dicts)
+            and ``st.session_state.uploaded_file.name``.
+            Does not mutate ``st.session_state``.
+            """
             _lines = [f"# Chat Export — {getattr(st.session_state.uploaded_file, 'name', 'Dataset')}\n"]
             for _i, _t in enumerate(st.session_state.chat_history, 1):
                 _r = _t["result"]
@@ -580,8 +663,10 @@ with col_main:
                 _prev       = st.session_state.chat_history[-1]
                 _prev_cond  = _prev.get("intent", {}).get("conditions", [])
                 _intent     = merge_follow_up_conditions(_intent, _prev_cond)
+                
+            _value_index = cached_value_index(_df_hash(df), df, schema.categorical_cols)
 
-            _engine  = QueryEngine(df, schema)
+            _engine  = QueryEngine(df, schema, value_index=_value_index)
             if "steps" in _intent:
                 try:
                     _validated_steps = validate_chain_intent(_intent)
@@ -600,7 +685,7 @@ with col_main:
                 and ENABLE_DYNAMIC_CODE_GEN
                 and gemini_helper.is_configured()
                 and "Unrecognized operation" in (_result.error or "")):
-                _result = run_dynamic_query(_final_q, df, schema)
+                _result = run_dynamic_query(_final_q, df, schema, value_index=_value_index)
 
             _summary      = None
             _used_gem_sum = False

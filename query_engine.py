@@ -30,6 +30,8 @@ from config import (
     OPERATIONS,
     SANDBOX_TIMEOUT_SECONDS,
 )
+from matching import fuzzy_match_category
+from models import RootIntentModel, SingleIntentModel, ConditionModel
 from utils import DatasetSchema, resolve_column
 
 logger = logging.getLogger(__name__)
@@ -65,14 +67,17 @@ class QueryResult:
     execution_path: str = "fixed"          # "fixed" or "dynamic"
     dynamic_code: str | None = None        # generated code (if dynamic path)
     dynamic_retry_count: int = 0           # number of retries used
+    fuzzy_matches: list[dict] = field(default_factory=list)  # list of dicts: original, matched, score, method
 
 
 class QueryEngine:
     """Executes structured intents against a single dataframe + schema."""
 
-    def __init__(self, df: pd.DataFrame, schema: DatasetSchema) -> None:
+    def __init__(self, df: pd.DataFrame, schema: DatasetSchema, value_index: dict | None = None) -> None:
         self.df = df
         self.schema = schema
+        self.value_index = value_index or {}
+        self.fuzzy_matches_recorded: list[dict] = []
 
     # ------------------------------------------------------------------
     # Column resolution helpers
@@ -94,7 +99,7 @@ class QueryEngine:
         return numeric_cols[0] if numeric_cols else None
 
     def _apply_conditions(
-        self, df: pd.DataFrame, conditions: list[dict]
+        self, df: pd.DataFrame, conditions: list[Any]
     ) -> tuple[pd.DataFrame, list[str], list[str]]:
         """Apply filter conditions and return (filtered_df, used_cols, skipped).
 
@@ -105,21 +110,39 @@ class QueryEngine:
         skipped: list[str] = []
         out = df
         for cond in conditions or []:
-            col = self._resolve(cond.get("column"))
-            op = (cond.get("op") or "eq").lower()
-            val = cond.get("value")
-            val2 = cond.get("value2")
+            if isinstance(cond, dict):
+                cond = ConditionModel.model_validate(cond)
+            col = self._resolve(cond.column)
+            op = (cond.op or "eq").lower()
+            val = cond.value
+            val2 = cond.value2
             if not col:
-                skipped.append(f"Unresolved column '{cond.get('column')}'")
+                skipped.append(f"Unresolved column '{cond.column}'")
                 continue
             used.append(col)
             series = out[col]
             try:
+                # --------------------------------------------------------------
+                # Phase 3: Fuzzy Categorical Matching
+                # Intercept exact matches on categorical columns
+                # --------------------------------------------------------------
+                fuzzy_matched = False
+                if op in {"eq", "==", "neq"} and self.value_index and col in self.schema.categorical_cols:
+                    match_res = fuzzy_match_category(val, col, self.value_index)
+                    if match_res:
+                        val = match_res["matched"]
+                        fuzzy_matched = True
+                        if match_res["method"] != "exact":
+                            self.fuzzy_matches_recorded.append(match_res)
+
                 if op in {"eq", "=="}:
                     if pd.api.types.is_numeric_dtype(series):
                         out = out[series == float(val)]
                     else:
-                        out = out[series.astype(str).str.lower() == str(val).lower()]
+                        if fuzzy_matched:
+                            out = out[series.astype(str) == str(val)]
+                        else:
+                            out = out[series.astype(str).str.lower() == str(val).lower()]
                 elif op in {"contains", "like"}:
                     out = out[series.astype(str).str.lower().str.contains(str(val).lower(), regex=False, na=False)]
                 elif op in {"gt", ">"}:
@@ -135,7 +158,10 @@ class QueryEngine:
                     numeric = pd.to_numeric(series, errors="coerce")
                     out = out[(numeric >= lo) & (numeric <= hi)]
                 elif op == "neq":
-                    out = out[series.astype(str).str.lower() != str(val).lower()]
+                    if fuzzy_matched:
+                        out = out[series.astype(str) != str(val)]
+                    else:
+                        out = out[series.astype(str).str.lower() != str(val).lower()]
                 elif op == "isna":
                     out = out[series.isna()]
                 elif op == "notna":
@@ -150,9 +176,11 @@ class QueryEngine:
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
-    def execute(self, intent: dict) -> QueryResult:
+    def execute(self, intent: Any) -> QueryResult:
         """Execute a structured intent and return a QueryResult."""
-        op = (intent.get("operation") or "").lower().strip()
+        if isinstance(intent, dict):
+            intent = RootIntentModel.model_validate(intent)
+        op = (intent.operation or "").lower().strip()
         if op not in OPERATIONS:
             return QueryResult(
                 operation=op or "unknown",
@@ -175,11 +203,16 @@ class QueryEngine:
             result = handler(intent)
             result.execution_time_ms = round((time.time() - t0) * 1000, 1)
             result.rows_scanned = len(self.df)
-            result.filters_applied = len(intent.get("conditions", []))
+            result.filters_applied = len(intent.conditions)
             if result.table_result is not None:
                 result.rows_matched = len(result.table_result)
             elif result.scalar_result is not None:
                 result.rows_matched = result.scalar_result if isinstance(result.scalar_result, int) else 0
+            
+            # Attach fuzzy matches recorded during this execution
+            result.fuzzy_matches.extend(self.fuzzy_matches_recorded)
+            self.fuzzy_matches_recorded.clear()
+
             logger.info(
                 "Query executed: op=%s, time=%.1fms, rows_matched=%d",
                 op, result.execution_time_ms, result.rows_matched,
@@ -210,13 +243,10 @@ class QueryEngine:
 
         Legacy single-operation (routed through ``execute()`` directly)::
 
-            {"operation": "count", "column": "Budget", "conditions": [...]}
-
-        Multi-step chain (routed through this method)::
-
-            {"steps": [
-                {"operation": "filter", "conditions": [...]},
-                {"operation": "sort", "column": "Budget", "ascending": false},
+            return SingleIntentModel(
+                operation="filter",
+                conditions=categorical_conditions
+            )    {"operation": "sort", "column": "Budget", "ascending": false},
                 {"operation": "topn", "column": "Budget", "n": 5}
             ]}
         """
@@ -226,6 +256,8 @@ class QueryEngine:
         t0_chain = time.time()
 
         for i, step in enumerate(steps):
+            if isinstance(step, dict):
+                step = SingleIntentModel.model_validate(step)
             rows_before = len(working_df)
             step_engine = QueryEngine(working_df, self.schema)
             result = step_engine.execute(step)
@@ -237,7 +269,7 @@ class QueryEngine:
             )
             trace.append(StepTrace(
                 step_number=i + 1,
-                operation=step.get("operation", "unknown"),
+                operation=(step.operation or "unknown"),
                 rows_before=rows_before,
                 rows_after=rows_after,
                 explanation=result.explanation,
@@ -247,7 +279,7 @@ class QueryEngine:
             if not result.success:
                 result.step_trace = trace
                 result.error = (
-                    f"Step {i + 1} ({step.get('operation', 'unknown')}) failed: "
+                    f"Step {i + 1} ({(step.operation or "unknown")}) failed: "
                     f"{result.error}"
                 )
                 logger.warning(
@@ -285,11 +317,11 @@ class QueryEngine:
     # Operation handlers – each returns a QueryResult
     # ------------------------------------------------------------------
     def _op_count(self, intent: dict) -> QueryResult:
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         n = len(filtered)
         explanation = (
             f"Counted rows in the dataframe after applying "
-            f"{len(intent.get('conditions', []))} filter(s): {n} rows matched."
+            f"{len(intent.conditions)} filter(s): {n} rows matched."
         )
         if skipped:
             explanation += f" Skipped conditions: {'; '.join(skipped)}."
@@ -300,8 +332,8 @@ class QueryEngine:
         )
 
     def _op_sum(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         series = pd.to_numeric(filtered[col], errors="coerce") if col else None
         nan_excluded = int(series.isna().sum()) if series is not None else 0
         total = series.sum() if series is not None else None
@@ -317,8 +349,8 @@ class QueryEngine:
         )
 
     def _op_average(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         series = pd.to_numeric(filtered[col], errors="coerce") if col else None
         nan_excluded = int(series.isna().sum()) if series is not None else 0
         avg = series.mean() if series is not None else None
@@ -334,8 +366,8 @@ class QueryEngine:
         )
 
     def _op_median(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         series = pd.to_numeric(filtered[col], errors="coerce") if col else None
         nan_excluded = int(series.isna().sum()) if series is not None else 0
         med = series.median() if series is not None else None
@@ -352,8 +384,8 @@ class QueryEngine:
 
     def _op_extremum(self, intent: dict, func: str) -> QueryResult:
         """Shared handler for min/max operations to avoid duplication."""
-        col = self._numeric_col(intent.get("column"))
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         series = pd.to_numeric(filtered[col], errors="coerce") if col else None
         if series is not None and not series.dropna().empty:
             clean = series.dropna()
@@ -379,9 +411,9 @@ class QueryEngine:
         return self._op_extremum(intent, "max")
 
     def _op_filter(self, intent: dict) -> QueryResult:
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         explanation = (
-            f"Applied {len(intent.get('conditions', []))} filter condition(s) "
+            f"Applied {len(intent.conditions)} filter condition(s) "
             f"-> {len(filtered)} matching rows."
         )
         if skipped:
@@ -393,9 +425,9 @@ class QueryEngine:
         )
 
     def _op_greater_than(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        val = intent.get("value")
-        conditions = [{"column": col, "op": "gt", "value": val}] + list(intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        val = intent.value
+        conditions = [{"column": col, "op": "gt", "value": val}] + list(intent.conditions)
         filtered, used, skipped = self._apply_conditions(self.df, conditions)
         explanation = f"Filtered rows where {col} > {val} -> {len(filtered)} rows."
         if skipped:
@@ -407,9 +439,9 @@ class QueryEngine:
         )
 
     def _op_less_than(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        val = intent.get("value")
-        conditions = [{"column": col, "op": "lt", "value": val}] + list(intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        val = intent.value
+        conditions = [{"column": col, "op": "lt", "value": val}] + list(intent.conditions)
         filtered, used, skipped = self._apply_conditions(self.df, conditions)
         explanation = f"Filtered rows where {col} < {val} -> {len(filtered)} rows."
         if skipped:
@@ -421,9 +453,9 @@ class QueryEngine:
         )
 
     def _op_between(self, intent: dict) -> QueryResult:
-        col = self._numeric_col(intent.get("column"))
-        val, val2 = intent.get("value"), intent.get("value2")
-        conditions = [{"column": col, "op": "between", "value": val, "value2": val2}] + list(intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        val, val2 = intent.value, intent.value2
+        conditions = [{"column": col, "op": "between", "value": val, "value2": val2}] + list(intent.conditions)
         filtered, used, skipped = self._apply_conditions(self.df, conditions)
         explanation = (
             f"Filtered rows where {col} is between {val} and {val2} "
@@ -438,11 +470,11 @@ class QueryEngine:
         )
 
     def _op_sort(self, intent: dict) -> QueryResult:
-        col = self._resolve(intent.get("column"), self.schema.primary_budget_col)
-        ascending = bool(intent.get("ascending", False))
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._resolve(intent.column, self.schema.primary_budget_col)
+        ascending = bool((intent.ascending or False))
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
         sorted_df = filtered.sort_values(by=col, ascending=ascending) if col else filtered
-        n = intent.get("n")
+        n = intent.n
         if n:
             sorted_df = sorted_df.head(int(n))
         return QueryResult(
@@ -454,9 +486,9 @@ class QueryEngine:
 
     def _op_ranked(self, intent: dict, ascending: bool) -> QueryResult:
         """Shared handler for topn/bottomn to avoid duplication."""
-        col = self._numeric_col(intent.get("column"))
-        n = int(intent.get("n") or 5)
-        filtered, used, _skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        col = self._numeric_col(intent.column)
+        n = int(intent.n or 5)
+        filtered, used, _skipped = self._apply_conditions(self.df, intent.conditions)
         ranked = filtered.sort_values(by=col, ascending=ascending).head(n) if col else filtered.head(n)
         label = "bottom" if ascending else "top"
         return QueryResult(
@@ -474,12 +506,12 @@ class QueryEngine:
 
     def _op_groupby(self, intent: dict) -> QueryResult:
         group_col = self._resolve(
-            intent.get("group_by") or intent.get("column"),
+            intent.group_by or intent.column,
             self.schema.location_col or self.schema.property_type_col,
         )
-        agg_col = self._numeric_col(intent.get("agg_column"))
-        agg_func = (intent.get("agg_func") or "mean").lower()
-        filtered, used, _skipped = self._apply_conditions(self.df, intent.get("conditions", []))
+        agg_col = self._numeric_col(intent.agg_column)
+        agg_func = (intent.agg_func or "mean").lower()
+        filtered, used, _skipped = self._apply_conditions(self.df, intent.conditions)
 
         if not group_col:
             return QueryResult(
@@ -510,7 +542,7 @@ class QueryEngine:
         )
 
     def _op_unique(self, intent: dict) -> QueryResult:
-        col = self._resolve(intent.get("column"), self.schema.location_col)
+        col = self._resolve(intent.column, self.schema.location_col)
         values = sorted(self.df[col].dropna().astype(str).unique().tolist()) if col else []
         return QueryResult(
             operation="unique", success=True,
@@ -520,7 +552,7 @@ class QueryEngine:
         )
 
     def _op_distinct_count(self, intent: dict) -> QueryResult:
-        col = self._resolve(intent.get("column"), self.schema.location_col)
+        col = self._resolve(intent.column, self.schema.location_col)
         n = int(self.df[col].nunique(dropna=True)) if col else None
         return QueryResult(
             operation="distinct_count", success=True, scalar_result=n,
@@ -529,7 +561,7 @@ class QueryEngine:
         )
 
     def _op_describe(self, intent: dict) -> QueryResult:
-        col = self._resolve(intent.get("column"))
+        col = self._resolve(intent.column)
         target = self.df[[col]] if col else self.df.select_dtypes(include="number")
         desc = target.describe()
         return QueryResult(
@@ -539,8 +571,8 @@ class QueryEngine:
         )
 
     def _op_list(self, intent: dict) -> QueryResult:
-        filtered, used, skipped = self._apply_conditions(self.df, intent.get("conditions", []))
-        n = intent.get("n")
+        filtered, used, skipped = self._apply_conditions(self.df, intent.conditions)
+        n = intent.n
         if n:
             filtered = filtered.head(int(n))
         explanation = f"Listed {len(filtered)} matching row(s) after applying filters."
@@ -568,9 +600,9 @@ class QueryEngine:
                 error="No date column detected in the dataset.",
             )
 
-        op = (intent.get("date_op") or "after").lower()
-        date_val = intent.get("value")
-        date_val2 = intent.get("value2")
+        op = (intent.date_op or "after").lower()
+        date_val = intent.value
+        date_val2 = intent.value2
 
         series = pd.to_datetime(self.df[date_col], errors="coerce")
         if op == "after" and date_val:
@@ -599,7 +631,7 @@ class QueryEngine:
     # ------------------------------------------------------------------
     def _op_missing(self, intent: dict) -> QueryResult:
         """Find rows with missing (NaN) values in a specific column."""
-        col = self._resolve(intent.get("column"))
+        col = self._resolve(intent.column)
         if not col:
             # Show all rows that have ANY missing value
             filtered = self.df[self.df.isna().any(axis=1)]
@@ -686,7 +718,7 @@ def _extract_numbers_with_shared_units(q: str) -> list[float]:
 
 def _match_categorical_conditions(
     q: str, schema: DatasetSchema, df: pd.DataFrame | None = None
-) -> list[dict]:
+) -> list[ConditionModel]:
     """Detect mentions of known categorical values (e.g. '2BHK', 'Pune')
     anywhere in the question and turn them into filter conditions, without
     hardcoding any specific column name."""
@@ -702,29 +734,34 @@ def _match_categorical_conditions(
         for value in df[col].dropna().astype(str).unique():
             token = value.lower().strip()
             if token and re.search(rf"\b{re.escape(token)}\b", q):
-                conditions.append({"column": col, "op": "contains", "value": value})
+                conditions.append(ConditionModel(column=col, op="contains", value=value))
                 break  # only take the first matching value per column
     return conditions
 
 
 def merge_follow_up_conditions(
-    new_intent: dict, previous_conditions: list[dict]
-) -> dict:
+    new_intent: RootIntentModel | SingleIntentModel, previous_conditions: list[ConditionModel]
+) -> RootIntentModel | SingleIntentModel:
     """Merge conditions from a previous query into the new intent to
     support conversational follow-ups like 'only those above 90 lakhs'.
 
     Only merges if the new intent has no conditions of its own for a
     column that the previous query already filtered on.
     """
+    if isinstance(new_intent, dict):
+        new_intent = RootIntentModel.model_validate(new_intent)
+    if previous_conditions and isinstance(previous_conditions[0], dict):
+        previous_conditions = [ConditionModel.model_validate(c) for c in previous_conditions]
+
     if not previous_conditions:
         return new_intent
 
-    existing = new_intent.get("conditions", [])
-    existing_cols = {c.get("column") for c in existing}
+    existing = new_intent.conditions
+    existing_cols = {c.column for c in existing if c.column}
     for cond in previous_conditions:
-        if cond.get("column") not in existing_cols:
+        if cond.column not in existing_cols:
             existing.append(cond)
-    new_intent["conditions"] = existing
+    new_intent.conditions = existing
     return new_intent
 
 
@@ -756,24 +793,25 @@ _MONTH_MAP: dict[str, str] = {
 }
 
 
-def validate_chain_intent(intent: dict) -> list[dict]:
+def validate_chain_intent(intent: RootIntentModel | dict) -> list[SingleIntentModel]:
     """Validate a multi-step intent and return the sanitized steps list.
 
     Raises ValueError if the structure is malformed.
     """
-    steps = intent.get("steps")
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("'steps' must be a non-empty list of operation dicts.")
+    if isinstance(intent, dict):
+        intent = RootIntentModel.model_validate(intent)
+        
+    steps = intent.steps
+    if not steps:
+        raise ValueError("'steps' must be a non-empty list of operation objects.")
     if len(steps) > MAX_QUERY_STEPS:
         raise ValueError(
             f"Too many steps ({len(steps)}). "
             f"Maximum allowed is {MAX_QUERY_STEPS}."
         )
-    validated: list[dict] = []
+    validated: list[SingleIntentModel] = []
     for i, step in enumerate(steps):
-        if not isinstance(step, dict):
-            raise ValueError(f"Step {i + 1} is not a valid object.")
-        op = (step.get("operation") or "").lower().strip()
+        op = (step.operation or "").lower().strip()
         if op not in OPERATIONS:
             raise ValueError(
                 f"Step {i + 1} has invalid operation '{op}'. "
@@ -785,7 +823,7 @@ def validate_chain_intent(intent: dict) -> list[dict]:
 
 def _parse_single_intent(
     question: str, schema: DatasetSchema, df: pd.DataFrame | None = None
-) -> dict[str, Any]:
+) -> SingleIntentModel:
     """Parse a single-operation intent from the question.
 
     This is the core keyword-based matching logic, extracted so that
@@ -813,7 +851,7 @@ def _parse_single_intent(
                 col_hint = schema.primary_budget_col
             elif any(w in q for w in ("name", "customer")):
                 col_hint = schema.name_col
-        return {"operation": "missing", "column": col_hint}
+        return SingleIntentModel(operation="missing", column=col_hint)
 
     # --- Date queries ---
     # Check multi-word patterns first (e.g. "this month", "last month")
@@ -825,22 +863,22 @@ def _parse_single_intent(
         if multiword_match:
             phrase = multiword_match.group(1).lower()
             if phrase == "this month":
-                return {"operation": "date_filter", "date_op": "this_month", "value": None}
+                return SingleIntentModel(operation="date_filter", date_op="this_month", value=None)
             if phrase == "last month":
                 import datetime
                 now = datetime.date.today()
                 first = now.replace(day=1)
                 last_month_end = first - datetime.timedelta(days=1)
                 last_month_start = last_month_end.replace(day=1)
-                return {"operation": "date_filter", "date_op": "between",
-                        "value": str(last_month_start), "value2": str(last_month_end)}
+                return SingleIntentModel(operation="date_filter", date_op="between",
+                        value=str(last_month_start), value2=str(last_month_end))
             if phrase in ("this year",):
                 import datetime
                 year = datetime.date.today().year
-                return {"operation": "date_filter", "date_op": "between",
-                        "value": f"January 1, {year}", "value2": f"December 31, {year}"}
+                return SingleIntentModel(operation="date_filter", date_op="between",
+                        value=f"January 1, {year}", value2=f"December 31, {year}")
             if phrase in ("recent", "latest"):
-                return {"operation": "sort", "column": schema.date_cols[0], "ascending": False, "n": 10}
+                return SingleIntentModel(operation="sort", column=schema.date_cols[0], ascending=False, n=10)
 
         if date_match:
             date_op_word = date_match.group(1).lower()
@@ -850,55 +888,77 @@ def _parse_single_intent(
                 import datetime
                 year = datetime.date.today().year
                 if date_op_word in ("after", "since", "from"):
-                    return {"operation": "date_filter", "date_op": "after",
-                            "value": f"{full_month} 1, {year}"}
+                    return SingleIntentModel(
+                        operation="date_filter",
+                        date_op="after",
+                        value=f"{full_month} 1, {year}"
+                    )
                 elif date_op_word in ("before", "until"):
-                    return {"operation": "date_filter", "date_op": "before",
-                            "value": f"{full_month} 1, {year}"}
+                    return SingleIntentModel(
+                        operation="date_filter",
+                        date_op="before",
+                        value=f"{full_month} 1, {year}"
+                    )
 
     if "unique" in q or "distinct" in q:
         col = schema.location_col if ("location" in q or "city" in q or "area" in q) else (
             schema.property_type_col if "type" in q else schema.location_col
         )
         if "how many" in q or "count" in q:
-            return {"operation": "distinct_count", "column": col}
-        return {"operation": "unique", "column": col}
+            return SingleIntentModel(operation="distinct_count", column=col)
+        return SingleIntentModel(operation="unique", column=col)
     if "median" in q:
-        return {"operation": "median", "column": budget_col, "conditions": categorical_conditions}
+        return SingleIntentModel(operation="median", column=budget_col, conditions=categorical_conditions)
     if "average" in q or "avg" in q or "mean" in q:
         if ("by" in q or "each" in q or "per " in q) and (schema.location_col or schema.property_type_col):
             group_col = schema.location_col if ("city" in q or "location" in q) else (schema.property_type_col or schema.location_col)
-            return {"operation": "groupby", "group_by": group_col, "agg_column": budget_col, "agg_func": "mean"}
-        return {"operation": "average", "column": budget_col, "conditions": categorical_conditions}
+            return SingleIntentModel(operation="groupby", group_by=group_col, agg_column=budget_col, agg_func="mean")
+        return SingleIntentModel(operation="average", column=budget_col, conditions=categorical_conditions)
     if "sum" in q or "total" in q:
-        return {"operation": "sum", "column": budget_col, "conditions": categorical_conditions}
+        return SingleIntentModel(operation="sum", column=budget_col, conditions=categorical_conditions)
     if "highest" in q or "max" in q or "maximum" in q:
         if ("by" in q or "which" in q) and (schema.location_col or schema.property_type_col):
             group_col = schema.location_col or schema.property_type_col
-            return {"operation": "groupby", "group_by": group_col, "agg_column": budget_col, "agg_func": "mean"}
-        return {"operation": "max", "column": budget_col, "conditions": categorical_conditions}
+            return SingleIntentModel(operation="groupby", group_by=group_col, agg_column=budget_col, agg_func="mean")
+        return SingleIntentModel(operation="max", column=budget_col, conditions=categorical_conditions)
     if "lowest" in q or "min" in q or "minimum" in q or "cheapest" in q:
-        return {"operation": "min", "column": budget_col, "conditions": categorical_conditions}
+        return SingleIntentModel(operation="min", column=budget_col, conditions=categorical_conditions)
     if "between" in q and len(numbers) >= 2:
-        return {"operation": "between", "column": budget_col, "value": numbers[0], "value2": numbers[1], "conditions": categorical_conditions}
+        return SingleIntentModel(
+            operation="between",
+            column=budget_col,
+            value=min(numbers),
+            value2=max(numbers),
+            conditions=categorical_conditions
+        )
     if ("above" in q or "greater" in q or "more than" in q or "over" in q) and numbers:
-        return {"operation": "greater_than", "column": budget_col, "value": numbers[0], "conditions": categorical_conditions}
+        return SingleIntentModel(
+            operation="greater_than",
+            column=budget_col,
+            value=numbers[0],
+            conditions=categorical_conditions
+        )
     if ("below" in q or "less than" in q or "under" in q) and numbers:
-        return {"operation": "less_than", "column": budget_col, "value": numbers[0], "conditions": categorical_conditions}
+        return SingleIntentModel(
+            operation="less_than",
+            column=budget_col,
+            value=numbers[0],
+            conditions=categorical_conditions
+        )
     if "top" in q:
         n_match = re.search(r"top\s+(\d+)", q)
-        return {"operation": "topn", "column": budget_col, "n": int(n_match.group(1)) if n_match else 5, "conditions": categorical_conditions}
+        return SingleIntentModel(operation="topn", column=budget_col, n=int(n_match.group(1)) if n_match else 5, conditions=categorical_conditions)
     if "bottom" in q:
         n_match = re.search(r"bottom\s+(\d+)", q)
-        return {"operation": "bottomn", "column": budget_col, "n": int(n_match.group(1)) if n_match else 5, "conditions": categorical_conditions}
+        return SingleIntentModel(operation="bottomn", column=budget_col, n=int(n_match.group(1)) if n_match else 5, conditions=categorical_conditions)
     if "group" in q or "breakdown" in q or "distribution" in q:
         group_col = schema.status_col or schema.location_col or schema.property_type_col
-        return {"operation": "groupby", "group_by": group_col, "agg_column": None, "agg_func": "count"}
-    if "how many" in q or "count" in q or "number of" in q:
-        return {"operation": "count", "conditions": categorical_conditions}
-    if categorical_conditions or "list" in q or "show" in q or "give me" in q or "interested" in q:
-        return {"operation": "list", "conditions": categorical_conditions, "n": 50}
-    return {"operation": "list", "conditions": categorical_conditions, "n": 20}
+        return SingleIntentModel(operation="groupby", group_by=group_col, agg_column=None, agg_func="count")
+    if "list" in q or "show" in q or "details" in q:
+        return SingleIntentModel(operation="list", conditions=categorical_conditions)
+    if "sort" in q or "order" in q:
+        return SingleIntentModel(operation="sort", column=budget_col, ascending=("asc" in q or "lowest" in q), conditions=categorical_conditions)
+    return SingleIntentModel(operation="count", conditions=categorical_conditions)
 
 
 # Regex for detecting chain boundaries in natural-language questions.
@@ -908,14 +968,14 @@ _CHAIN_SPLIT_RE = re.compile(r",?\s+(?:and\s+)?then\s+", re.IGNORECASE)
 
 def rule_based_intent(
     question: str, schema: DatasetSchema, df: pd.DataFrame | None = None
-) -> dict[str, Any]:
+) -> RootIntentModel:
     """A conservative keyword-based fallback so the app still works
     without an LLM (or if the Gemini call fails / quota is exceeded).
 
     If the question contains chain markers (e.g. "… then sort by …"),
     each segment is parsed independently and returned as
-    ``{"steps": [intent1, intent2, …]}``.  Otherwise a single intent
-    dict is returned in the legacy format.
+    ``RootIntentModel(steps=[intent1, intent2, …])``.  Otherwise a single intent
+    is returned.
     """
     parts = _CHAIN_SPLIT_RE.split(question)
     if len(parts) > 1:
@@ -925,8 +985,10 @@ def rule_based_intent(
             if part.strip()
         ]
         if len(steps) > 1:
-            return {"steps": steps[:MAX_QUERY_STEPS]}
-    return _parse_single_intent(question, schema, df)
+            return RootIntentModel(steps=steps[:MAX_QUERY_STEPS])
+    
+    single = _parse_single_intent(question, schema, df)
+    return RootIntentModel(**single.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -1031,7 +1093,7 @@ def execute_sandboxed(code: str, df: pd.DataFrame, timeout: int = 5) -> dict:
 
 
 def run_dynamic_query(
-    question: str, df: pd.DataFrame, schema: DatasetSchema, max_retries: int = DYNAMIC_CODE_MAX_RETRIES
+    question: str, df: pd.DataFrame, schema: DatasetSchema, max_retries: int = DYNAMIC_CODE_MAX_RETRIES, value_index: dict | None = None
 ) -> QueryResult:
     """Attempt dynamic code generation with self-correction retries."""
     import gemini_helper  # Import here to avoid circular dependencies
@@ -1046,7 +1108,7 @@ def run_dynamic_query(
     t0 = time.time()
     code = None
     try:
-        code = gemini_helper.generate_pandas_code(question, df_schema)
+        code = gemini_helper.generate_pandas_code(question, df_schema, value_index=value_index)
     except Exception as e:
         logger.error("Dynamic code generation failed initially: %s", e)
         return QueryResult(

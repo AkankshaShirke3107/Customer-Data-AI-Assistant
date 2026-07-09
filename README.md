@@ -14,7 +14,7 @@ Every answer is computed by Pandas and verified before Gemini phrases it.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/streamlit-1.38+-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
 [![Google Gemini](https://img.shields.io/badge/gemini-2.5--flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
-[![Tests](https://img.shields.io/badge/tests-83_passed-22C55E?style=flat-square)](test_query_engine.py)
+[![Tests](https://img.shields.io/badge/tests-125_passed-22C55E?style=flat-square)](test_query_engine.py)
 [![License: MIT](https://img.shields.io/badge/license-MIT-A78BFA?style=flat-square)](LICENSE)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [How It Works](#how-it-works) · [Supported Queries](#supported-queries)
@@ -87,8 +87,9 @@ If Gemini is unavailable, rate-limited, or not configured, the system continues 
 | **Zero-Hallucination Engine** | Architectural separation ensures all numeric results come from Pandas; the LLM only phrases already-computed values |
 | **Execution Audit Trail** | Every answer shows intent classification method, exact Pandas operation, columns accessed, rows scanned, and execution time |
 | **Auto-Visualization** | Dynamically selects bar, pie, histogram, box, or correlation heatmap based on result shape and operation semantics |
-| **Conversational Context** | Follow-up questions inherit filter conditions from the previous query for natural multi-turn analysis |
-| **Rule-Based Fallback** | Full intent parsing via keyword and regex matching when the Gemini API is unavailable |
+| **Conversational Memory** | Follow-up questions intelligently merge context (e.g. "Who has a budget over 1Cr?" -> "And only in Pune?") |
+| **Fuzzy & Normalized Matching** | (Phase 3) Deterministically catches inconsistent data entry (e.g. "Pune " vs "PUNE") for categorical fields like location, property type, or status using `rapidfuzz`, without needing an LLM to guess |
+| **Dynamic Pandas Code Generation** | (Phase 1) When fixed filters aren't enough, Gemini securely generates pandas code to answer complex questions (e.g. "What is the average budget of leads in Mumbai compared to Pune?"). Code is executed inside a local sandbox with self-correcting retry loops |
 | **Column Explorer** | Inline view of all columns with detected semantic role, dtype, missing percentage, and sample values |
 | **AI-Generated Insights** | Automatically surfaces key patterns and statistics from the uploaded dataset on every load |
 | **CSV + Excel Support** | Accepts `.xlsx`, `.xls`, and `.csv` files up to 50 MB |
@@ -116,9 +117,14 @@ customer-data-ai-assistant/
 ├── utils.py                File loading, validation, schema detection, profiling
 ├── query_engine.py         Deterministic Pandas execution engine (20 operations)
 ├── gemini_helper.py        Gemini API integration — retry, timeout, validation
+├── models.py               Pydantic intent models (RootIntentModel, ConditionModel)
+├── matching.py             Fuzzy/normalized string matching for categorical columns
 ├── charts.py               Plotly chart selection and dark-theme styling
 ├── style.css               Custom CSS — dark theme, typography, animations
-├── test_query_engine.py    Automated test suite (83 tests)
+├── test_query_engine.py    Primary test suite (114 tests)
+├── test_matching.py        Fuzzy matching tests
+├── test_schema_detection.py Schema detection tests
+├── test_gemini_helper.py   Gemini intent parsing tests
 ├── requirements.txt        Pinned dependency versions
 ├── .env.example            Environment variable template
 ├── .gitignore              Security and artifact exclusions
@@ -202,10 +208,10 @@ Open `http://localhost:8501`. Click **"Try Demo Dataset Instead"** on the landin
 ### Running Tests
 
 ```bash
-python -m pytest test_query_engine.py -v
+python -m pytest test_query_engine.py test_matching.py test_schema_detection.py test_gemini_helper.py -v
 ```
 
-Expected: **83 passed** in under 3 seconds.
+Expected: **125 passed** across all test modules in under 15 seconds.
 
 ---
 
@@ -242,32 +248,6 @@ filtered = df[df["Preferred Location"] == "Pune"]
 result   = filtered[pd.to_numeric(filtered["Budget (INR)"], errors="coerce") > 9_000_000]
 ```
 
-The engine records execution metadata: rows scanned, rows matched, filters applied, columns used, and wall-clock execution time in milliseconds. This data powers the audit trail displayed in the UI.
-
-### 1. Intent Classification
-
-If the Google Gemini API is configured, the question is passed to Gemini with the dataset schema (column names and types). Gemini is prompted to return a structured JSON intent using one of the predefined operations.
-
-If Gemini is unavailable, the system falls back to a rule-based parser that uses keyword and regex matching to determine the intent.
-
-### 2. Fixed-Operation Execution (Fast Path)
-
-The parsed intent is passed to the `QueryEngine`, which applies any requested filters and executes the specific pandas handler (e.g., `_op_average`, `_op_groupby`). This path is deterministic, heavily tested, and extremely fast.
-
-### 3. Dynamic Code Generation (Fallback Path)
-
-If the intent parser cannot confidently match the question to one of the 20 fixed operations, the system falls back to a dynamic code generation pipeline:
-
-1. **Generation:** Gemini is prompted to write a single Pandas expression or short block of code to answer the question, using only the provided DataFrame schema.
-2. **Sandboxed Execution:** The generated code is executed in a restricted sandbox (`execute_sandboxed`) with a strict thread-based timeout (5 seconds) and a whitelisted set of builtins (no imports, no file I/O, no network calls). The original DataFrame is safely copied before execution.
-3. **Self-Correction:** If the code fails (e.g., `KeyError` on a hallucinated column name, or a `SyntaxError`), the error is fed back to Gemini for up to 2 automatic correction retries. 
-
-This enables the application to answer complex, compound queries (e.g., *"Average budget of 2BHK buyers in Pune, grouped by contact status"*) that exceed the capabilities of the fixed operations, without compromising application stability.
-
----
-
-## Security and Privacy
-
 ### 4 · Summarization
 
 The computed result — a scalar value or a preview of the filtered DataFrame — is passed to Gemini with explicit instructions to phrase it naturally without altering any values. If Gemini is unavailable, a template-based summary is generated locally from the result metadata.
@@ -279,6 +259,16 @@ The computed result — a scalar value or a preview of the filtered DataFrame �
 ### 6 · Conversational Context
 
 Filter conditions from the previous query are merged into the follow-up intent when the new query does not explicitly override them. This enables natural multi-turn conversations without requiring the user to repeat context.
+
+### 7 · Dynamic Code Generation (Fallback Path)
+
+If the intent parser cannot confidently match the question to one of the 20 fixed operations, the system falls back to a dynamic code generation pipeline:
+
+1. **Generation:** Gemini is prompted to write a single Pandas expression or short block of code to answer the question, using only the provided DataFrame schema.
+2. **Sandboxed Execution:** The generated code is executed in a restricted sandbox (`execute_sandboxed`) with a strict thread-based timeout (5 seconds) and a whitelisted set of builtins (no imports, no file I/O, no network calls). The original DataFrame is safely copied before execution.
+3. **Self-Correction:** If the code fails (e.g., `KeyError` on a hallucinated column name, or a `SyntaxError`), the error is fed back to Gemini for up to 2 automatic correction retries.
+
+This enables the application to answer complex, compound queries (e.g., *"Average budget of 2BHK buyers in Pune, grouped by contact status"*) that exceed the capabilities of the fixed operations, without compromising application stability.
 
 ---
 
@@ -391,7 +381,7 @@ git clone https://github.com/your-username/Customer-Data-AI-Assistant.git
 git checkout -b feature/your-feature-name
 
 # 3. Make changes, then run the test suite
-python -m pytest test_query_engine.py -v
+python -m pytest test_query_engine.py test_matching.py test_schema_detection.py test_gemini_helper.py -v
 
 # 4. Push and open a pull request
 git push origin feature/your-feature-name

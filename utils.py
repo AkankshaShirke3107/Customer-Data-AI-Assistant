@@ -94,9 +94,17 @@ class DatasetSchema:
 
 
 def _matches_any(col_name: str, keywords: list[str]) -> bool:
-    """Check if a column name matches any of the keywords."""
-    lowered = col_name.lower()
-    return any(kw in lowered for kw in keywords)
+    """Check if a column name matches any of the keywords using a word boundary.
+    
+    Uses \b prefix to ensure we don't match inside a word (e.g. 'paid' -> 'id').
+    It allows prefix matching like 'ref' to 'reference' or 'Ref #'.
+    """
+    import re
+    for kw in keywords:
+        pattern = r"\b" + re.escape(kw.lower())
+        if re.search(pattern, col_name, re.IGNORECASE):
+            return True
+    return False
 
 
 def validate_upload(file) -> None:
