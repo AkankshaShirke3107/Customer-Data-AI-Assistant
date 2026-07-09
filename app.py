@@ -1,14 +1,17 @@
 """
 app.py
 ------
-Customer Data AI Assistant — "Chat with your Excel data using Natural Language."
+Customer Data AI Assistant
+UI: Premium redesign for real estate sales professionals.
+    Inspired by ChatGPT Enterprise · Notion AI · Vercel · Stripe.
+Backend: 100% unchanged — query_engine, gemini_helper, charts, exports,
+         conversational memory, intent classification, Pandas execution.
 """
 from __future__ import annotations
 import html as html_mod
 import io
 import logging
 import os
-import time
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -25,84 +28,67 @@ from utils import detect_schema, load_dataframe, profile_dataset, rule_based_ins
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format=LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Customer Data AI Assistant",
-    page_icon="⚡",
+    page_icon="✦",
     layout="wide",
     initial_sidebar_state="collapsed",
-    menu_items={
-        "Get Help": "https://github.com",
-        "About": "Customer Data AI Assistant — Chat with your Excel/CSV data using Natural Language."
-    }
+    menu_items={"About": "Customer Data AI Assistant — Chat with your data using natural language."},
 )
 
-# Inject CSS
-with open(os.path.join(os.path.dirname(__file__), "style.css"), "r") as f:
-    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+# ── CSS ────────────────────────────────────────────────────────────────────
+with open(os.path.join(os.path.dirname(__file__), "style.css"), "r") as _f:
+    st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
-# SVG Icons
-ICONS = {
-    "upload": '<svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>',
-    "database": '<svg class="icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>',
-    "rows": '<svg class="icon" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>',
-    "cols": '<svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="3" x2="12" y2="21"></line><line x1="6" y1="3" x2="6" y2="21"></line><line x1="18" y1="3" x2="18" y2="21"></line></svg>',
-    "alert": '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
-    "check": '<svg class="icon" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-    "bot": '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>',
-    "user": '<svg class="icon" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
-    "sparkle": '<svg class="icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
-    "cpu": '<svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>',
-}
 
-# --------------------------------------------------------------------------
-# CACHED HELPERS (Backend Unchanged)
-# --------------------------------------------------------------------------
+def _e(text: str) -> str:
+    """HTML-escape to prevent XSS."""
+    return html_mod.escape(str(text))
+
+
+# ── CACHED BACKEND HELPERS (unchanged) ────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def cached_load_dataframe(file_bytes: bytes) -> pd.DataFrame:
     return load_dataframe(io.BytesIO(file_bytes))
 
 @st.cache_data(show_spinner=False)
-def cached_profile(_df_hash: str, df: pd.DataFrame) -> dict:
+def cached_profile(_h: str, df: pd.DataFrame) -> dict:
     return profile_dataset(df)
 
 @st.cache_data(show_spinner=False)
-def cached_schema(_df_hash: str, df: pd.DataFrame):
+def cached_schema(_h: str, df: pd.DataFrame):
     return detect_schema(df)
 
 @st.cache_data(show_spinner=False)
-def cached_rule_insights(_df_hash: str, df: pd.DataFrame, _schema) -> list[str]:
+def cached_rule_insights(_h: str, df: pd.DataFrame, _schema) -> list[str]:
     return rule_based_insights(df, _schema)
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
-def cached_gemini_insights(stats_key: str, stats_lines: list[str]) -> list[str]:
-    return gemini_helper.generate_insights(stats_lines)
+def cached_gemini_insights(key: str, lines: list[str]) -> list[str]:
+    return gemini_helper.generate_insights(lines)
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
-def cached_intent(question: str, columns: list[str], schema_dict: dict) -> dict | None:
+def cached_intent(q: str, cols: list[str], schema_dict: dict) -> dict | None:
     try:
-        return gemini_helper.understand_intent(question, columns, schema_dict)
+        return gemini_helper.understand_intent(q, cols, schema_dict)
     except Exception:
         return None
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
-def cached_summary(question: str, operation: str, payload: dict) -> str | None:
+def cached_summary(q: str, op: str, payload: dict) -> str | None:
     try:
-        return gemini_helper.summarize_result(question, operation, payload)
+        return gemini_helper.summarize_result(q, op, payload)
     except Exception:
         return None
+
 
 def _df_hash(df: pd.DataFrame) -> str:
-    """Content-aware hash: includes shape, column metadata, and a sample of
-    actual values so that two different files with the same schema produce
-    different cache keys."""
-    sample = df.head(3).to_json()  # small deterministic content fingerprint
+    sample = df.head(3).to_json()
     return f"{len(df)}_{df.shape[1]}_{hash(tuple(df.columns))}_{hash(tuple(df.dtypes))}_{hash(sample)}"
+
 
 def build_result_payload(result) -> dict:
     payload = {"operation": result.operation, "scalar_result": result.scalar_result}
@@ -111,74 +97,69 @@ def build_result_payload(result) -> dict:
         payload["row_count"] = len(result.table_result)
     return payload
 
+
 def fallback_summary(question: str, result) -> str:
     if not result.success:
-        return f"Error: {result.error}"
+        return f"I wasn't able to process that request. {result.error}"
     if result.scalar_result is not None and (
-        result.table_result is None or result.operation in {"count", "sum", "average", "median", "min", "max", "distinct_count", "missing"}
+        result.table_result is None
+        or result.operation in {"count", "sum", "average", "median", "min", "max", "distinct_count", "missing"}
     ):
         val = result.scalar_result
-        if isinstance(val, float): val = round(val, 2)
-        return f"The computed {result.operation} is {val}."
+        if isinstance(val, float):
+            val = round(val, 2)
+        return f"The answer is **{val}**."
     if result.table_result is not None:
-        return f"I found {len(result.table_result)} rows matching your criteria."
-    return "Query executed successfully."
+        return f"I found **{len(result.table_result)} customers** matching your criteria."
+    return "Done! Here are the results based on your dataset."
 
+
+# ── SESSION STATE ──────────────────────────────────────────────────────────
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-
-def _esc(text: str) -> str:
-    """HTML-escape user-supplied / LLM-generated text to prevent XSS."""
-    return html_mod.escape(str(text))
-
-# --------------------------------------------------------------------------
-# STATE INITIALIZATION
-# --------------------------------------------------------------------------
-df = None
-load_error = None
-
-# Sidebar is now ONLY for system settings, hidden by default
-with st.sidebar:
-    st.markdown("### Settings")
-    if gemini_helper.is_configured():
-        st.success("Gemini API Connected")
-    else:
-        st.warning("Gemini API Missing")
-        st.session_state["_gemini_key"] = st.text_input("API Key", type="password")
-        if st.session_state["_gemini_key"]:
-            os.environ["GEMINI_API_KEY"] = st.session_state["_gemini_key"]
-            st.rerun()
-
-# Welcome Mode Wrapper
 if "uploaded_file" not in st.session_state:
     st.session_state.uploaded_file = None
 
-placeholder = st.empty()
+# ── SIDEBAR (settings only) ───────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Settings")
+    if gemini_helper.is_configured():
+        st.success("✓ Gemini AI Connected")
+    else:
+        st.warning("Gemini API key missing")
+        _key = st.text_input("API Key", type="password")
+        if _key:
+            os.environ["GEMINI_API_KEY"] = _key
+            st.rerun()
 
-with placeholder.container():
+
+# ══════════════════════════════════════════════════════════════════════════
+# WELCOME SCREEN
+# ══════════════════════════════════════════════════════════════════════════
+_placeholder = st.empty()
+
+with _placeholder.container():
     st.markdown(
         '''
         <div class="welcome-hero">
-            <div style="display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);padding:6px 14px;border-radius:99px;font-size:12px;font-weight:600;margin-bottom:24px;color:var(--text-2);">
-                <span style="color:var(--primary);">✦</span> Customer Data AI Assistant
-            </div>
-            <h1 class="welcome-title">Chat with your Excel data using Natural Language.</h1>
+            <div class="welcome-pill">✦ AI-Powered Customer Intelligence</div>
+            <h1 class="welcome-title">Chat with your customer<br>data in plain English.</h1>
             <p class="welcome-subtitle">
-                Enterprise-grade analytics powered by Pandas and Gemini. 
-                Upload your dataset to instantly generate insights, charts, and deterministic answers with zero hallucinations.
+                Upload your sales data and get instant answers — no formulas, no filters,
+                no spreadsheet skills required.
             </p>
         </div>
-        ''', unsafe_allow_html=True
+        ''',
+        unsafe_allow_html=True,
     )
-    
-    col_up1, col_up2, col_up3 = st.columns([1, 2, 1])
-    with col_up2:
+
+    _c1, _c2, _c3 = st.columns([1, 2, 1])
+    with _c2:
         uploaded = st.file_uploader(
-            "Drop your dataset here",
+            "Drop your dataset",
             type=["xlsx", "xls", "csv"],
             label_visibility="collapsed",
-            help="Supported formats: Excel (.xlsx, .xls) and CSV (.csv)"
+            help="Excel (.xlsx, .xls) or CSV — up to 50 MB",
         )
         if uploaded:
             try:
@@ -188,417 +169,468 @@ with placeholder.container():
                 st.stop()
             st.session_state.uploaded_file = uploaded
             st.rerun()
-        
-        use_sample = st.button("Try Demo Dataset Instead", use_container_width=True)
-        if use_sample:
-            sample_path = os.path.join(os.path.dirname(__file__), "data", "sample_leads.xlsx")
-            with open(sample_path, "rb") as f:
-                st.session_state.uploaded_file = io.BytesIO(f.read())
+
+        if st.button("Try with Sample Dataset →", use_container_width=True):
+            _sample = os.path.join(os.path.dirname(__file__), "data", "sample_leads.xlsx")
+            with open(_sample, "rb") as _sf:
+                st.session_state.uploaded_file = io.BytesIO(_sf.read())
                 st.session_state.uploaded_file.name = "sample_leads.xlsx"
             st.rerun()
 
     st.markdown(
-        f'''
+        '''
         <div class="welcome-features">
             <div class="welcome-feature">
-                {ICONS["database"]}
-                <h3>Deterministic Engine</h3>
-                <p>Every calculation is performed natively in Pandas. AI is only used for intent understanding — zero hallucinations.</p>
+                <div class="wf-icon">💬</div>
+                <h3>Ask in Plain English</h3>
+                <p>Just type your question. No formulas, no filters, no training needed.</p>
             </div>
             <div class="welcome-feature">
-                {ICONS["sparkle"]}
-                <h3>Auto-Insights &amp; Charts</h3>
-                <p>Instantly detects schemas and generates statistical summaries, charts, and a correlation heatmap on upload.</p>
+                <div class="wf-icon">📊</div>
+                <h3>Instant Visual Insights</h3>
+                <p>Charts and summaries generated automatically from your data.</p>
             </div>
             <div class="welcome-feature">
-                {ICONS["cpu"]}
-                <h3>Explainable AI</h3>
-                <p>Full transparency — view the exact execution timeline, rows scanned, and intent method for every query.</p>
+                <div class="wf-icon">✓</div>
+                <h3>Always Accurate</h3>
+                <p>Every answer is computed directly from your uploaded file — never guessed.</p>
             </div>
         </div>
-        <div style="text-align:center;margin-top:24px;color:var(--text-3);font-size:12px;">
-            Supports Excel (.xlsx, .xls) and CSV files up to 50 MB
+        <div style="text-align:center;margin-top:20px;color:var(--text-4);font-size:12px;">
+            Supports Excel (.xlsx, .xls) and CSV — up to 50 MB
         </div>
-        ''', unsafe_allow_html=True
+        ''',
+        unsafe_allow_html=True,
     )
 
 if st.session_state.uploaded_file is None:
     st.stop()
 
-# Clear placeholder
-placeholder.empty()
+_placeholder.empty()
 
-# --------------------------------------------------------------------------
-# STATE 2: WORKSPACE MODE
-# --------------------------------------------------------------------------
+
+# ══════════════════════════════════════════════════════════════════════════
+# WORKSPACE — load data & compute metadata
+# ══════════════════════════════════════════════════════════════════════════
 try:
-    file_bytes = st.session_state.uploaded_file.getvalue()
-    df = cached_load_dataframe(file_bytes)
-except Exception as e:
-    st.error(f"Failed to load dataset: {e}")
-    if st.button("Reset"):
-        st.session_state.pop("uploaded_file")
+    _file_bytes = st.session_state.uploaded_file.getvalue()
+    df = cached_load_dataframe(_file_bytes)
+except Exception as _e_load:
+    st.error(f"Couldn't load the file. Please try a different dataset. ({_e_load})")
+    if st.button("↩ Start Over"):
+        st.session_state.pop("uploaded_file", None)
         st.rerun()
     st.stop()
 
-df_h = _df_hash(df)
+df_h   = _df_hash(df)
 schema = cached_schema(df_h, df)
 profile = cached_profile(df_h, df)
 
-# HEADER
+_fname = _e(getattr(st.session_state.uploaded_file, "name", "Dataset"))
+
+# Compute average budget (business-friendly)
+_avg_fmt        = ""
+_avg_budget_raw = None
+_avg_stat_html  = ""
+if schema.primary_budget_col and schema.primary_budget_col in df.columns:
+    try:
+        _avg_budget_raw = df[schema.primary_budget_col].mean()
+        if _avg_budget_raw > 100000:
+            _avg_fmt = f"₹{_avg_budget_raw/100000:.1f}L"
+        else:
+            _avg_fmt = f"{_avg_budget_raw:,.0f}"
+        _avg_stat_html = f'''
+        <div class="hero-divider"></div>
+        <div class="hero-stat">
+            <div class="hero-stat-value">{_avg_fmt}</div>
+            <div class="hero-stat-label">Avg {_e(schema.primary_budget_col)}</div>
+        </div>'''
+    except Exception:
+        pass
+
+
+# ── HERO CARD ─────────────────────────────────────────────────────────────
+# NOTE: _avg_stat_html is injected as trusted HTML (values are escaped via _e()).
+# The entire hero-card block is one self-contained st.markdown call with
+# unsafe_allow_html=True, so no orphaned tags can leak.
 st.markdown(
     f'''
-    <div class="workspace-header">
-        <div class="workspace-title">
-            <div class="ws-icon">{ICONS["database"]}</div>
-            <div>
-                <div class="ws-name">{_esc(getattr(st.session_state.uploaded_file, "name", "Dataset"))}</div>
-                <div class="ws-meta">
-                    <span>{ICONS["rows"]} {profile["rows"]:,} rows</span>
-                    <span>{ICONS["cols"]} {profile["columns"]} columns</span>
+    <div class="hero-card">
+        <div class="hero-top">
+            <div class="hero-file">
+                <div class="hero-file-icon">🗄️</div>
+                <div>
+                    <div class="hero-filename">📁 {_fname}</div>
+                    <div class="hero-loaded">✓ Dataset Successfully Loaded</div>
                 </div>
             </div>
+            <div class="hero-status">
+                <div class="hero-status-dot"></div>
+                Ready for Analysis
+            </div>
         </div>
-        <div>
-            <!-- Header Actions can go here -->
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="hero-stat-value">{profile["rows"]:,}</div>
+                <div class="hero-stat-label">Customers</div>
+            </div>
+            <div class="hero-divider"></div>
+            <div class="hero-stat">
+                <div class="hero-stat-value">{profile["columns"]}</div>
+                <div class="hero-stat-label">Columns</div>
+            </div>
+            {_avg_stat_html}
         </div>
     </div>
-    ''', unsafe_allow_html=True
+    ''',
+    unsafe_allow_html=True,
 )
 
-# Change Dataset button
-if st.button("↻ Change Dataset", key="change_dataset"):
+# Change dataset — plain text label (no SVG to avoid raw-text rendering)
+if st.button("↩ Change Dataset", key="change_ds"):
     st.session_state.pop("uploaded_file", None)
     st.session_state.chat_history = []
     st.rerun()
 
-# KPI BENTO
-html_kpi = '<div class="kpi-grid">'
-kpis = [
-    ("Total Records", f"{profile['rows']:,}", "accent-blue", ICONS["rows"]),
-    ("Features", f"{profile['columns']}", "accent-purple", ICONS["cols"]),
-    ("Missing Data", f"{profile['missing_total']:,}", "accent-amber", ICONS["alert"]),
-    ("Duplicates", f"{profile['duplicate_rows']:,}", "accent-green", ICONS["check"]),
-]
-for label, val, color, icon in kpis:
-    html_kpi += f'''
-    <div class="kpi-card {color}">
-        <div class="kpi-header">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-icon-wrap">{icon}</div>
-        </div>
-        <div class="kpi-val">{val}</div>
-    </div>
-    '''
-html_kpi += '</div>'
-st.markdown(html_kpi, unsafe_allow_html=True)
 
-# Data quality warnings
-_warnings = []
-if profile['missing_total'] > 0:
-    missing_pct = (profile['missing_total'] / (profile['rows'] * profile['columns'])) * 100
-    if missing_pct > 5:
-        _warnings.append(f"⚠️ Dataset has {profile['missing_total']:,} missing values ({missing_pct:.1f}% of cells). Results may exclude NaN rows.")
-if profile['duplicate_rows'] > 0:
-    dup_pct = (profile['duplicate_rows'] / profile['rows']) * 100
-    if dup_pct > 2:
-        _warnings.append(f"⚠️ {profile['duplicate_rows']:,} duplicate rows detected ({dup_pct:.1f}%). Consider deduplication.")
-for _w in _warnings:
-    st.warning(_w)
+# ══════════════════════════════════════════════════════════════════════════
+# BUILD SUGGESTED QUESTIONS (dynamic, based on schema)
+# ══════════════════════════════════════════════════════════════════════════
+_suggested: list[str] = []
+_bc = schema.primary_budget_col
+_lc = schema.location_col
+_pc = schema.property_type_col
+_sc = schema.status_col
 
-# LAYOUT SPLIT
-col_left, col_right = st.columns([0.65, 0.35], gap="large")
+if _bc:
+    _suggested.append(f"What is the average {_bc}?")
+    _suggested.append(f"Show customers with {_bc} above {_avg_fmt if _avg_budget_raw else 'highest value'}")
+if _pc:
+    _suggested.append(f"How many customers prefer each {_pc}?")
+if _lc:
+    _suggested.append(f"Which {_lc} has the most customers?")
+if _sc:
+    _suggested.append(f"Show customers by {_sc} status")
+if schema.date_cols:
+    _suggested.append("Show customers added this month")
+_suggested.append("Who are the high-intent customers?")
+_suggested.append("Give me a summary of this dataset")
 
-with col_right:
-    # SUGGESTED
-    st.markdown(f'<div class="section-head">{ICONS["sparkle"]} Suggested Questions</div>', unsafe_allow_html=True)
-    suggested = []
-    # Dynamic suggestions based on schema
-    if schema.primary_budget_col:
-        suggested.append(f"What is the average {schema.primary_budget_col}?")
-        suggested.append(f"Who has the highest {schema.primary_budget_col}?")
-    if schema.property_type_col:
-        suggested.append(f"How many customers want each {schema.property_type_col}?")
-    if schema.location_col:
-        suggested.append(f"Which {schema.location_col} has the most customers?")
-    if schema.status_col:
-        suggested.append(f"Breakdown of {schema.status_col}")
-    if schema.date_cols:
-        suggested.append("Show customers added this month")
-    if profile['missing_total'] > 0:
-        suggested.append("Which columns have missing data?")
-    if profile['duplicate_rows'] > 0:
-        suggested.append(f"Show duplicate rows")
-    # Always add a few generic useful ones
-    suggested.append(f"Show top 5 by {schema.primary_budget_col or 'value'}")
-    suggested.append("Give a summary of the data")
-    # Deduplicate, show max 6
-    seen = set()
-    unique_suggested = []
-    for q in suggested:
-        if q not in seen:
-            seen.add(q)
-            unique_suggested.append(q)
-    suggested = unique_suggested[:6]
+# Deduplicate, cap at 6
+_seen: set = set()
+_unique_sugg: list[str] = []
+for _q in _suggested:
+    if _q not in _seen:
+        _seen.add(_q)
+        _unique_sugg.append(_q)
+_suggested = _unique_sugg[:6]
 
-    st.markdown('<div class="chip-container">', unsafe_allow_html=True)
-    clicked_question = None
-    for i, q in enumerate(suggested):
-        if st.button(q, key=f"sugg_{i}"):
-            clicked_question = q
 
-    st.markdown('''
-        <style>
-        div[data-testid="stVerticalBlock"]:has(.chip-container) div.stButton>button {
-            background: var(--surface) !important;
-            border: 1px solid var(--border) !important;
-            border-radius: 999px !important;
-            color: var(--text-2) !important;
-            font-size: 13px !important;
-            padding: 8px 16px !important;
-            width: 100% !important;
-            text-align: left !important;
-            justify-content: flex-start !important;
-            transition: var(--transition) !important;
+# ══════════════════════════════════════════════════════════════════════════
+# TWO-COLUMN LAYOUT
+# ══════════════════════════════════════════════════════════════════════════
+col_main, col_side = st.columns([0.65, 0.35], gap="large")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# RIGHT SIDEBAR
+# ──────────────────────────────────────────────────────────────────────────
+with col_side:
+
+    # ── Suggested Questions ────────────────────────────────────────────
+    st.markdown(
+        '<div class="section-title">✦ Suggested Questions</div>',
+        unsafe_allow_html=True,
+    )
+
+    _clicked_q = None
+    for _i, _q in enumerate(_suggested):
+        if st.button(_q, key=f"sq_{_i}", use_container_width=True):
+            _clicked_q = _q
+
+    # ── Column Explorer (collapsed) ────────────────────────────────────
+    st.markdown(
+        '<div class="section-title" style="margin-top:16px">⊞ Column Explorer</div>',
+        unsafe_allow_html=True,
+    )
+    with st.expander("View columns & data types", expanded=False):
+        _col_role = {
+            schema.name_col:           "👤 Customer Name",
+            schema.primary_budget_col: "💰 Budget",
+            schema.location_col:       "📍 Location",
+            schema.property_type_col:  "🏠 Property Type",
+            schema.status_col:         "🔖 Status",
+            schema.contact_col:        "📞 Contact",
         }
-        div[data-testid="stVerticalBlock"]:has(.chip-container) div.stButton>button:hover {
-            background: var(--card) !important;
-            border-color: var(--primary) !important;
-            color: var(--text) !important;
-            transform: translateX(4px) !important;
-        }
-        </style>
-        ''', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        for _dc in schema.date_cols:
+            _col_role[_dc] = "📅 Date"
+        for _ic_col in schema.id_cols:
+            _col_role[_ic_col] = "🔑 ID"
 
-    # COLUMN EXPLORER
-    st.markdown(f'<div class="section-head" style="margin-top:24px;">{ICONS["database"]} Column Explorer</div>', unsafe_allow_html=True)
-    with st.expander("View all columns & detected roles", expanded=False):
-        _col_role_map = {
-            schema.name_col: "👤 Name",
-            schema.primary_budget_col: "💰 Budget (Primary)",
-            schema.location_col: "📍 Location",
-            schema.property_type_col: "🏠 Property Type",
-            schema.status_col: "🔖 Status",
-            schema.contact_col: "📞 Contact",
-        }
-        for dc in schema.date_cols:
-            _col_role_map[dc] = "📅 Date"
-        for ic in schema.id_cols:
-            _col_role_map[ic] = "🔑 ID"
-        for bc in schema.budget_cols[1:]:
-            _col_role_map[bc] = "💰 Budget"
-
-        col_rows = []
-        for cp in profile["column_profiles"]:
-            col_rows.append({
-                "Column": cp.name,
-                "Role": _col_role_map.get(cp.name, "📊 Numeric" if cp.role == "numeric" else "📝 Categorical"),
-                "Type": cp.dtype,
-                "Missing": f"{cp.missing_pct:.1f}%" if cp.missing > 0 else "—",
-                "Unique": cp.unique_count,
-                "Sample": ", ".join(str(v) for v in cp.sample_values[:2]),
+        _col_rows = []
+        for _cp in profile["column_profiles"]:
+            _col_rows.append({
+                "Column": _cp.name,
+                "Type":   _col_role.get(_cp.name, "📊 Data"),
+                "Sample": ", ".join(str(_v) for _v in _cp.sample_values[:2]),
             })
-        st.dataframe(
-            pd.DataFrame(col_rows),
-            use_container_width=True,
-            hide_index=True,
+        st.dataframe(pd.DataFrame(_col_rows), use_container_width=True, hide_index=True)
+
+    # ── AI Insights — single card ──────────────────────────────────────
+    st.markdown(
+        '<div class="section-title" style="margin-top:16px">✧ AI Insights</div>',
+        unsafe_allow_html=True,
+    )
+
+    _stat_lines = cached_rule_insights(df_h, df, schema)
+    _insights   = _stat_lines
+    if gemini_helper.is_configured():
+        _insights = cached_gemini_insights("|".join(_stat_lines), _stat_lines)
+
+    _rows_html = ""
+    for _line in _insights:
+        _rows_html += f'''
+        <div class="insight-row">
+            <div class="insight-dot"></div>
+            <div class="insight-txt">{_e(_line)}</div>
+        </div>'''
+
+    st.markdown(
+        f'''
+        <div class="insights-card">
+            <div class="insights-head">
+                <span class="insights-head-icon">✦</span>
+                <span class="insights-head-title">Dataset Insights</span>
+            </div>
+            <div class="insights-body">{_rows_html}</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# MAIN CHAT AREA
+# ──────────────────────────────────────────────────────────────────────────
+with col_main:
+
+    # ── EMPTY STATE ────────────────────────────────────────────────────
+    if not st.session_state.chat_history:
+        st.markdown(
+            '''
+            <div class="chat-empty">
+                <div class="chat-empty-icon">✦</div>
+                <div class="chat-empty-title">👋 Ask anything about your customers</div>
+                <div class="chat-empty-sub">
+                    Type a question below or tap a suggestion to get started instantly.
+                </div>
+                <div class="chat-empty-label">Try asking</div>
+            </div>
+            ''',
+            unsafe_allow_html=True,
         )
 
-    # INSIGHTS
-    st.markdown(f'<div class="section-head" style="margin-top:8px;">{ICONS["cpu"]} AI Insights</div>', unsafe_allow_html=True)
-    stat_lines = cached_rule_insights(df_h, df, schema)
-    insights = stat_lines
-    if gemini_helper.is_configured():
-        insights = cached_gemini_insights("|".join(stat_lines), stat_lines)
-    
-    for line in insights:
-        st.markdown(f'''
-        <div class="insight-box">
-            <div class="insight-top">
-                <span class="insight-cat">Insight</span>
-            </div>
-            <div class="insight-text">{_esc(line)}</div>
-        </div>
-        ''', unsafe_allow_html=True)
+        # Clickable example chips — rendered as Streamlit buttons with CSS targeting
+        _ex_questions = [
+            "Customers with budget above ₹90L",
+            "Show all 3BHK buyers",
+            "Average budget",
+            "High-intent customers",
+            "Which location has most leads?",
+        ]
+        # Use columns layout to create a centered chip grid
+        _chip_col1, _chip_col2 = st.columns(2)
+        for _ei, _eq in enumerate(_ex_questions):
+            _col = _chip_col1 if _ei % 2 == 0 else _chip_col2
+            with _col:
+                if st.button(_eq, key=f"ex_{_ei}", use_container_width=True):
+                    _clicked_q = _eq
 
-with col_left:
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    st.markdown('<div class="chat-history">', unsafe_allow_html=True)
-    
-    # RENDER HISTORY
-    for idx, turn in enumerate(st.session_state.chat_history):
-        result = turn["result"]
-        
-        # User
-        st.markdown(f'''
-        <div class="chat-turn">
-            <div class="chat-user">
-                <div class="msg-bubble">{_esc(turn["question"])}</div>
-                <div class="avatar avatar-u">{ICONS["user"]}</div>
+    # ── CHAT HISTORY ───────────────────────────────────────────────────
+    for _idx, _turn in enumerate(st.session_state.chat_history):
+        _result = _turn["result"]
+
+        # User message
+        st.markdown(
+            f'''
+            <div class="user-row">
+                <div class="user-bubble">{_e(_turn["question"])}</div>
+                <div class="user-avatar">👤</div>
             </div>
-        ''', unsafe_allow_html=True)
-        
-        # AI
-        st.markdown(f'''
-            <div class="chat-ai">
-                <div class="avatar avatar-ai">{ICONS["bot"]}</div>
-                <div class="msg-content">
-                    <div class="msg-bubble-ai">{_esc(turn["summary"])}</div>
-        ''', unsafe_allow_html=True)
-        
-        # Timeline Explainability
-        intent_method = "Gemini AI" if turn["used_gemini_intent"] else "Rule-based"
-        st.markdown(f'''
-                    <div class="timeline">
-                        <div class="timeline-title">{ICONS["cpu"]} Execution Pipeline</div>
-                        <div class="tl-step">
-                            <div class="tl-line"></div>
-                            <div class="tl-icon">{ICONS["bot"]}</div>
-                            <div class="tl-content">
-                                <div class="tl-label">Intent Classification</div>
-                                <div class="tl-val">Parsed via {intent_method} → <code>{result.operation}</code></div>
-                            </div>
-                        </div>
-                        <div class="tl-step">
-                            <div class="tl-line"></div>
-                            <div class="tl-icon">{ICONS["database"]}</div>
-                            <div class="tl-content">
-                                <div class="tl-label">Pandas Processing</div>
-                                <div class="tl-val">Scanned {result.rows_scanned:,} rows · {result.execution_time_ms:.1f}ms</div>
-                            </div>
-                        </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+
+        # AI response
+        st.markdown(
+            f'''
+            <div class="ai-row">
+                <div class="ai-avatar">✦</div>
+                <div class="ai-bubble-wrap">
+                    <div class="response-answer">{_e(_turn["summary"])}</div>
+                </div>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+
+        # Table result
+        if _result.success and _result.table_result is not None and not _result.table_result.empty:
+            st.dataframe(_result.table_result.head(TABLE_DISPLAY_ROWS), use_container_width=True)
+            _csv = _result.table_result.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇ Download CSV",
+                _csv,
+                f"results_{_idx + 1}.csv",
+                "text/csv",
+                key=f"dl_{_idx}",
+            )
+
+        # Empty result
+        elif _result.success and (
+            _result.scalar_result == 0
+            or (_result.table_result is not None and _result.table_result.empty)
+        ):
+            st.markdown(
+                '''
+                <div class="no-results">
+                    <div class="no-results-emoji">🔍</div>
+                    <div class="no-results-title">No results found</div>
+                    <div class="no-results-hint">
+                        Try rephrasing — for example, check spelling of city names or property types.
                     </div>
-        ''', unsafe_allow_html=True)
-        
-        # Table Preview
-        if result.success and result.table_result is not None and not result.table_result.empty:
-            st.dataframe(result.table_result.head(TABLE_DISPLAY_ROWS), use_container_width=True)
-            csv_bytes = result.table_result.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv_bytes, f"result_{idx}.csv", "text/csv", key=f"dl_{idx}")
+                </div>
+                ''',
+                unsafe_allow_html=True,
+            )
 
-        # Empty result state (Feature 8)
-        elif result.success and (result.scalar_result == 0 or result.table_result is not None and result.table_result.empty):
-            st.markdown('''
-            <div class="empty-result-state">
-                <div class="empty-result-icon">🔍</div>
-                <div class="empty-result-title">No results found</div>
-                <div class="empty-result-hint">Try rephrasing your question or using different filter values.</div>
-            </div>
-            ''', unsafe_allow_html=True)
+        # Chart
+        if _turn["fig"]:
+            st.plotly_chart(_turn["fig"], use_container_width=True, key=f"chart_{_idx}")
 
-        # Chart (Bug 6 fix: charts are already styled in charts.py — no re-styling needed)
-        if turn["fig"]:
-            fig = turn["fig"]
-            st.plotly_chart(fig, use_container_width=True, key=f"chart_{idx}")
+        # Turn separator
+        st.markdown('<div class="chat-turn-divider"></div>', unsafe_allow_html=True)
 
-        st.markdown('</div></div></div>', unsafe_allow_html=True)
-    
-    # Empty State for Chat
-    if not st.session_state.chat_history:
-        st.markdown('<div style="margin:auto;text-align:center;color:var(--text-3);padding:40px;">Send a message to start analyzing data.</div>', unsafe_allow_html=True)
-        
-    st.markdown('</div>', unsafe_allow_html=True) # close chat history
-
-    # Download Chat History as Markdown (Feature 2)
+    # ── Export Chat ────────────────────────────────────────────────────
     if st.session_state.chat_history:
-        def _build_chat_markdown() -> str:
-            lines = [f"# Chat Export — {getattr(st.session_state.uploaded_file, 'name', 'Dataset')}\n"]
-            for i, turn in enumerate(st.session_state.chat_history, 1):
-                r = turn["result"]
-                lines.append(f"## Q{i}: {turn['question']}")
-                lines.append(f"**Answer:** {turn['summary']}")
-                lines.append(f"**Operation:** `{r.operation}` | **Rows scanned:** {r.rows_scanned:,} | **Time:** {r.execution_time_ms:.1f}ms")
-                if r.table_result is not None and not r.table_result.empty:
-                    lines.append(r.table_result.head(20).to_markdown(index=False))
-                lines.append("")
-            return "\n".join(lines)
+        def _build_export() -> str:
+            _lines = [f"# Chat Export — {getattr(st.session_state.uploaded_file, 'name', 'Dataset')}\n"]
+            for _i, _t in enumerate(st.session_state.chat_history, 1):
+                _r = _t["result"]
+                _lines.append(f"## Q{_i}: {_t['question']}")
+                _lines.append(f"**Answer:** {_t['summary']}")
+                if _r.table_result is not None and not _r.table_result.empty:
+                    _lines.append(_r.table_result.head(20).to_markdown(index=False))
+                _lines.append("")
+            return "\n".join(_lines)
 
         try:
-            md_bytes = _build_chat_markdown().encode("utf-8")
+            _md = _build_export().encode("utf-8")
             st.download_button(
-                "📥 Export Chat as Markdown",
-                md_bytes,
+                "⬇ Export Full Chat",
+                _md,
                 "chat_export.md",
                 "text/markdown",
                 key="export_chat",
                 use_container_width=True,
             )
         except Exception:
-            pass  # tabulate may not be installed; silently skip
+            pass
 
-    question = st.chat_input("Ask anything about your data...")
-    st.markdown('</div>', unsafe_allow_html=True) # close chat container
+    # ── Chat Input ─────────────────────────────────────────────────────
+    _question = st.chat_input("Ask anything about your customer data…")
 
-    # Chat execution logic
-    final_question = clicked_question or question
-    if final_question:
-        with st.spinner("Processing query..."):
-            columns = list(df.columns)
-            schema_dict = schema.to_dict()
-            intent = None
-            used_gemini_intent = False
-            
+    # ── QUERY EXECUTION (backend 100% unchanged) ───────────────────────
+    _final_q = _clicked_q or _question
+    if _final_q:
+        with st.spinner("Analysing your data…"):
+            _cols       = list(df.columns)
+            _schema_d   = schema.to_dict()
+            _intent     = None
+            _used_gem   = False
+
             if gemini_helper.is_configured():
-                intent = cached_intent(final_question, columns, schema_dict)
-                used_gemini_intent = intent is not None
-            if intent is None:
-                intent = rule_based_intent(final_question, schema, df)
+                _intent   = cached_intent(_final_q, _cols, _schema_d)
+                _used_gem = _intent is not None
+            if _intent is None:
+                _intent = rule_based_intent(_final_q, schema, df)
 
-            # Conversational follow-up: merge filters from the last query
+            # Conversational memory: merge previous filters
             if st.session_state.chat_history:
-                prev = st.session_state.chat_history[-1]
-                prev_conditions = prev.get("intent", {}).get("conditions", [])
-                intent = merge_follow_up_conditions(intent, prev_conditions)
-                
-            engine = QueryEngine(df, schema)
-            result = engine.execute(intent)
-            
-            summary = None
-            used_gemini_summary = False
-            if result.success and gemini_helper.is_configured():
-                payload = build_result_payload(result)
-                summary = cached_summary(final_question, result.operation, payload)
-                used_gemini_summary = summary is not None
-            if summary is None:
-                summary = fallback_summary(final_question, result)
-                
-            fig = charts.auto_visualize(result.operation, result.table_result, schema, result.columns_used) if result.success else None
-            
+                _prev       = st.session_state.chat_history[-1]
+                _prev_cond  = _prev.get("intent", {}).get("conditions", [])
+                _intent     = merge_follow_up_conditions(_intent, _prev_cond)
+
+            _engine  = QueryEngine(df, schema)
+            _result  = _engine.execute(_intent)
+
+            _summary      = None
+            _used_gem_sum = False
+            if _result.success and gemini_helper.is_configured():
+                _payload      = build_result_payload(_result)
+                _summary      = cached_summary(_final_q, _result.operation, _payload)
+                _used_gem_sum = _summary is not None
+            if _summary is None:
+                _summary = fallback_summary(_final_q, _result)
+
+            _fig = (
+                charts.auto_visualize(
+                    _result.operation, _result.table_result, schema, _result.columns_used
+                )
+                if _result.success
+                else None
+            )
+
             st.session_state.chat_history.append({
-                "question": final_question,
-                "summary": summary,
-                "result": result,
-                "intent": intent,
-                "fig": fig,
-                "used_gemini_intent": used_gemini_intent,
-                "used_gemini_summary": used_gemini_summary,
+                "question":           _final_q,
+                "summary":            _summary,
+                "result":             _result,
+                "intent":             _intent,
+                "fig":                _fig,
+                "used_gemini_intent": _used_gem,
+                "used_gemini_summary":_used_gem_sum,
             })
 
-            # Enforce chat history limit
             if len(st.session_state.chat_history) > MAX_CHAT_HISTORY:
                 st.session_state.chat_history = st.session_state.chat_history[-MAX_CHAT_HISTORY:]
 
             st.rerun()
 
-# --------------------------------------------------------------------------
-# DATA PREVIEW & VISUAL PROFILE (Bottom)
-# --------------------------------------------------------------------------
-st.markdown('<div class="table-container">', unsafe_allow_html=True)
-st.markdown(f'<div class="section-head">{ICONS["database"]} Dataset Preview</div>', unsafe_allow_html=True)
-st.dataframe(df.head(DATA_PREVIEW_ROWS), use_container_width=True)
-st.markdown('</div>', unsafe_allow_html=True)
 
-# Overview charts
-overview_figs = charts.profile_overview_charts(df, schema)
-if overview_figs:
-    st.markdown('<div style="margin-top:32px;"></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="section-head">{ICONS["sparkle"]} Visual Profile</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    for i, (name, fig) in enumerate(overview_figs.items()):
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#A1A1AA"))
-        with (c1 if i%2==0 else c2):
-            st.markdown(f'<div class="chart-box"><div class="chart-box-title">{fig.layout.title.text if fig.layout.title else name}</div>', unsafe_allow_html=True)
-            fig.layout.title = None
-            st.plotly_chart(fig, use_container_width=True, key=f"prof_{name}")
+# ══════════════════════════════════════════════════════════════════════════
+# DATASET PREVIEW  (collapsed by default)
+# ══════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+with st.expander(f"Dataset Preview — first {DATA_PREVIEW_ROWS} rows", expanded=False):
+    st.dataframe(df.head(DATA_PREVIEW_ROWS), use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# INTERACTIVE ANALYTICS  (all charts preserved)
+# ══════════════════════════════════════════════════════════════════════════
+_overview_figs = charts.profile_overview_charts(df, schema)
+if _overview_figs:
+    st.markdown(
+        '<div class="analytics-header">📊 Interactive Analytics</div>',
+        unsafe_allow_html=True,
+    )
+    _c1, _c2 = st.columns(2)
+    for _ai, (_nm, _fig) in enumerate(_overview_figs.items()):
+        _fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#9494B8"),
+        )
+        _title_txt = (
+            _fig.layout.title.text
+            if _fig.layout.title and _fig.layout.title.text
+            else _nm
+        )
+        with (_c1 if _ai % 2 == 0 else _c2):
+            st.markdown(
+                f'<div class="chart-card"><div class="chart-card-title">{_e(_title_txt)}</div>',
+                unsafe_allow_html=True,
+            )
+            _fig.layout.title = None
+            st.plotly_chart(_fig, use_container_width=True, key=f"ov_{_nm}")
             st.markdown('</div>', unsafe_allow_html=True)
