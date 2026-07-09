@@ -47,17 +47,19 @@ logger = logging.getLogger(__name__)
 _ALLOWED_OPS = sorted(OPERATIONS)
 
 # ---------------------------------------------------------------------------
-# SDK configuration guard – configure only once per process
+# SDK configuration guard – configure only once per process unless key changes
 # ---------------------------------------------------------------------------
 _SDK_CONFIGURED: bool = False
+_LAST_API_KEY: str = ""
 
 
 def _ensure_sdk_configured(api_key: str) -> None:
-    """Configure the Gemini SDK exactly once."""
-    global _SDK_CONFIGURED
-    if not _SDK_CONFIGURED:
+    """Configure the Gemini SDK when the API key changes or is set for the first time."""
+    global _SDK_CONFIGURED, _LAST_API_KEY
+    if not _SDK_CONFIGURED or api_key != _LAST_API_KEY:
         genai.configure(api_key=api_key)
         _SDK_CONFIGURED = True
+        _LAST_API_KEY = api_key
         logger.info("Gemini SDK configured (model=%s)", GEMINI_MODEL)
 
 
