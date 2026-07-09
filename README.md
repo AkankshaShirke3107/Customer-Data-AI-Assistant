@@ -3,16 +3,20 @@
 # Customer Data AI Assistant
 
 <p align="center">
-  <img src="R.webp" alt="Customer Data AI Assistant Banner" width="100%">
+  <img src="R.webp" alt="Customer Data AI Assistant" width="100%">
 </p>
 
-**Natural language analytics for Excel data — with deterministic, hallucination-free results.**
+**Natural language analytics for Excel and CSV data — deterministic, auditable, hallucination-free.**
 
-Ask questions about your customer data in plain English. Get exact answers computed by Pandas, summarized by Gemini.
+Ask any question about your customer data in plain English.  
+Every answer is computed by Pandas and verified before Gemini phrases it.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/streamlit-1.38+-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
 [![Google Gemini](https://img.shields.io/badge/gemini-2.5--flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
+[![Tests](https://img.shields.io/badge/tests-83_passed-22C55E?style=flat-square)](test_query_engine.py)
+[![License: MIT](https://img.shields.io/badge/license-MIT-A78BFA?style=flat-square)](LICENSE)
+
 [Getting Started](#getting-started) · [Architecture](#architecture) · [How It Works](#how-it-works) · [Supported Queries](#supported-queries)
 
 </div>
@@ -21,59 +25,85 @@ Ask questions about your customer data in plain English. Get exact answers compu
 
 ## Overview
 
-Business teams spend hours wrestling with pivot tables, VLOOKUP chains, and complex BI dashboards to answer straightforward questions about their data: _"How many premium customers are in Pune?"_ or _"What is the average deal size this quarter?"_
+Business teams spend hours wrestling with pivot tables, VLOOKUP chains, and BI dashboards to answer straightforward questions: _"How many premium customers are in Pune?"_ or _"What is the average deal size this quarter?"_
 
-Large Language Models promise to solve this through natural language — but LLMs are unreliable at math. Feed raw data into a standard model and it will frequently hallucinate aggregations, invent statistics, and deliver confidently incorrect numbers.
+LLMs promise to fix this through natural language — but LLMs cannot be trusted to compute numbers. Feed raw tabular data into a standard model and it will frequently hallucinate aggregations, invent statistics, and deliver confidently wrong answers.
 
-**Customer Data AI Assistant** takes a different approach. It strictly separates language understanding from mathematical computation:
+**Customer Data AI Assistant** takes a different approach. It enforces a strict separation between language understanding and mathematical computation:
 
-- **Google Gemini** classifies your question into a structured intent (the _what_).
-- **Pandas** executes the actual computation deterministically (the _how_).
-- **Gemini** then phrases the already-computed result as a natural language response.
+- **Google Gemini** classifies your question into a structured intent — the *what*.
+- **Pandas** executes the computation deterministically — the *how*.
+- **Gemini** then phrases the already-verified result as a natural language response.
 
-The LLM never sees your raw data. It never computes a number. Every value in every answer is produced by a CPU executing DataFrame operations — not by a neural network guessing.
+The LLM never sees your raw data rows. It never performs arithmetic. Every number in every answer is the output of a CPU executing DataFrame operations — not a neural network estimating probabilities.
 
-If Gemini is unavailable, rate-limited, or unconfigured, the application continues to operate using a built-in rule-based intent parser. No external dependency is required for the system to function.
+If Gemini is unavailable, rate-limited, or not configured, the system continues operating via a built-in rule-based intent parser. No external dependency is required for the core functionality to work.
 
 ---
 
 ## Screenshots
 
-| View | Description |
-|:-----|:------------|
-| <img src="screenshots/hero.png" width="400"> | Landing page with hero section and status badges |
-| <img src="screenshots/dashboard.png" width="400"> | KPI cards and key statistics after dataset upload |
-| <img src="screenshots/chat.png" width="400"> | Chat interface with user/AI messages and confidence badge |
-| <img src="screenshots/pipeline.png" width="400"> | Execution details panel showing the audit trail timeline |
-| <img src="screenshots/charts.png" width="400"> | Auto-generated Plotly visualization with dark theme |
-| <img src="screenshots/insights.png" width="400"> | AI-generated insights section |
+<table>
+<tr>
+<td width="50%">
+<img src="screenshots/hero.png" alt="Landing Page" width="100%">
+<p align="center"><sub>Landing page — hero section with upload and demo dataset</sub></p>
+</td>
+<td width="50%">
+<img src="screenshots/dashboard.png" alt="Dashboard" width="100%">
+<p align="center"><sub>KPI cards, data quality warnings, and column statistics</sub></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="screenshots/chat.png" alt="Chat Interface" width="100%">
+<p align="center"><sub>Chat interface with user and AI messages</sub></p>
+</td>
+<td width="50%">
+<img src="screenshots/pipeline.png" alt="Execution Pipeline" width="100%">
+<p align="center"><sub>Execution audit trail — intent method, operation, rows, and timing</sub></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="screenshots/charts.png" alt="Auto Charts" width="100%">
+<p align="center"><sub>Automatically selected Plotly visualization for query results</sub></p>
+</td>
+<td width="50%">
+<img src="screenshots/insights.png" alt="AI Insights" width="100%">
+<p align="center"><sub>AI-generated dataset insights panel</sub></p>
+</td>
+</tr>
+</table>
 
 ---
 
 ## Key Features
 
-| Feature | Description | Status |
-|:--------|:------------|:------:|
-| Dynamic Schema Detection | Automatically maps any Excel column to semantic roles (budget, location, status, type) without hardcoded names | Stable |
-| Natural Language Queries | Supports counts, sums, averages, filters, sorts, groupings, ranges, top-N, and multi-condition queries | Stable |
-| Zero-Hallucination Engine | Strict architectural separation ensures all numbers come from Pandas, never from the LLM | Stable |
-| Execution Transparency | Every answer includes a full audit trail: operation, columns, rows scanned, execution time, and raw intent | Stable |
-| Auto-Visualization | Dynamically selects the appropriate Plotly chart type based on the shape and semantics of the result | Stable |
-| Conversational Context | Follow-up questions inherit filters from previous queries for multi-turn analysis | Stable |
-| Rule-Based Fallback | Continues operating via keyword and regex parsing when the Gemini API is unavailable | Stable |
-| One-Click Export | Download any filtered result as CSV or any chart as PNG directly from the interface | Stable |
-| AI-Generated Insights | Automatically surfaces key patterns and statistics from uploaded datasets | Stable |
-| Dark Theme UI | Premium interface with dark mode, smooth transitions, and responsive layout | Stable |
+| Feature | Description |
+|:--------|:------------|
+| **Dynamic Schema Detection** | Automatically classifies any Excel or CSV column into semantic roles (budget, location, status, property type, date, contact) — no hardcoded column names |
+| **20 Query Operations** | count, sum, average, median, min, max, filter, sort, groupby, topn, bottomn, between, greater\_than, less\_than, unique, distinct\_count, describe, list, date\_filter, missing |
+| **Zero-Hallucination Engine** | Architectural separation ensures all numeric results come from Pandas; the LLM only phrases already-computed values |
+| **Execution Audit Trail** | Every answer shows intent classification method, exact Pandas operation, columns accessed, rows scanned, and execution time |
+| **Auto-Visualization** | Dynamically selects bar, pie, histogram, box, or correlation heatmap based on result shape and operation semantics |
+| **Conversational Context** | Follow-up questions inherit filter conditions from the previous query for natural multi-turn analysis |
+| **Rule-Based Fallback** | Full intent parsing via keyword and regex matching when the Gemini API is unavailable |
+| **Column Explorer** | Inline view of all columns with detected semantic role, dtype, missing percentage, and sample values |
+| **AI-Generated Insights** | Automatically surfaces key patterns and statistics from the uploaded dataset on every load |
+| **CSV + Excel Support** | Accepts `.xlsx`, `.xls`, and `.csv` files up to 50 MB |
+| **Chat Export** | Download the full Q&A session as a formatted Markdown report |
+| **Result Export** | Download any filtered query result as a CSV file |
 
 ---
 
 ## Architecture
 
 <p align="center">
-  <img src="architecture.png" alt="Customer Data AI Assistant — Production Architecture Diagram" width="100%">
+  <img src="architecture.png" alt="Customer Data AI Assistant — System Architecture" width="100%">
 </p>
 
-> **Design constraint:** Raw data never leaves the local process. Only column names and schema metadata are sent to the LLM for intent classification.
+> **Privacy constraint:** Raw data rows never leave the local process. Only column names and inferred schema metadata are transmitted to the Gemini API for intent classification.
 
 ---
 
@@ -81,26 +111,29 @@ If Gemini is unavailable, rate-limited, or unconfigured, the application continu
 
 ```
 customer-data-ai-assistant/
-├── app.py                 Main application — UI layout, chat, rendering
-├── config.py              Centralized configuration and constants
-├── utils.py               File loading, validation, schema detection, profiling
-├── query_engine.py        Deterministic Pandas execution engine (17 operations)
-├── gemini_helper.py       Gemini API integration with retry, timeout, validation
-├── charts.py              Plotly chart selection and dark-theme styling
-├── requirements.txt       Pinned dependency versions
-├── .env.example           Environment variable template
-├── .gitignore             Security and build exclusions
+├── app.py                  Main application — Streamlit UI, routing, rendering
+├── config.py               Central configuration — all tunables in one place
+├── utils.py                File loading, validation, schema detection, profiling
+├── query_engine.py         Deterministic Pandas execution engine (20 operations)
+├── gemini_helper.py        Gemini API integration — retry, timeout, validation
+├── charts.py               Plotly chart selection and dark-theme styling
+├── style.css               Custom CSS — dark theme, typography, animations
+├── test_query_engine.py    Automated test suite (83 tests)
+├── requirements.txt        Pinned dependency versions
+├── .env.example            Environment variable template
+├── .gitignore              Security and artifact exclusions
+├── LICENSE                 MIT License
 └── data/
-    └── sample_leads.xlsx  Bundled dataset for immediate testing
+    └── sample_leads.xlsx   Bundled demo dataset (Pune real-estate leads)
 ```
 
 | Module | Responsibility |
 |:-------|:---------------|
-| `config.py` | All tunables in one place — model name, timeouts, retry counts, upload limits, UI constants |
-| `utils.py` | Server-side file validation, Excel loading, dynamic column classification, dataset profiling |
-| `query_engine.py` | Maps structured intents to Pandas operations. Contains 17 deterministic handlers and a rule-based fallback parser |
-| `gemini_helper.py` | Singleton SDK configuration, retry logic with configurable timeout, intent validation against an allowlist |
-| `charts.py` | Automatic chart type selection (bar, pie, histogram, box) with a dark-theme-compatible color system |
+| `config.py` | Model name, API timeouts, retry counts, upload limits, cache TTL, UI constants |
+| `utils.py` | Server-side validation, Excel/CSV loading, keyword-based column role detection, dataset profiling |
+| `query_engine.py` | 20 deterministic operation handlers, condition application, rule-based intent parser, conversational context merging |
+| `gemini_helper.py` | Singleton SDK configuration, retry logic with configurable timeout, JSON extraction, intent validation against allowlist |
+| `charts.py` | Automatic chart type selection, dark-theme color palette, profile overview charts including correlation heatmap |
 
 ---
 
@@ -109,47 +142,54 @@ customer-data-ai-assistant/
 ### Prerequisites
 
 - Python 3.10 or higher
-- A Google Gemini API key ([get one free](https://aistudio.google.com/app/apikey)) — optional, the app works without it
+- A Google Gemini API key — optional; the application functions fully without one via the built-in fallback engine
 
 ### Installation
+
+**1. Clone the repository**
 
 ```bash
 git clone https://github.com/AkankshaShirke3107/Customer-Data-AI-Assistant.git
 cd Customer-Data-AI-Assistant
+```
 
+**2. Create and activate a virtual environment**
+
+```bash
 python -m venv venv
-source venv/bin/activate        # macOS / Linux
-# venv\Scripts\activate         # Windows
 
+# macOS / Linux
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
+```
+
+**3. Install dependencies**
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Configuration
-
-Create a `.env` file from the provided template:
+**4. Configure environment variables**
 
 ```bash
 cp .env.example .env
 ```
 
+Edit `.env`:
+
 ```ini
-# .env
 GEMINI_API_KEY=your_api_key_here
 
-# Optional overrides
+# Optional — defaults shown
 # GEMINI_MODEL=gemini-2.5-flash
 # GEMINI_TIMEOUT_SECONDS=30
 # MAX_UPLOAD_SIZE_MB=50
 # LOG_LEVEL=INFO
 ```
 
-| Variable | Required | Default | Description |
-|:---------|:---------|:--------|:------------|
-| `GEMINI_API_KEY` | No | — | Google Gemini API key. App works without it via fallback engine. |
-| `GEMINI_MODEL` | No | `gemini-2.5-flash` | Model used for intent classification and summarization |
-| `GEMINI_TIMEOUT_SECONDS` | No | `30` | API call timeout in seconds |
-| `MAX_UPLOAD_SIZE_MB` | No | `50` | Maximum file upload size |
-| `LOG_LEVEL` | No | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+Get a free Gemini API key at [aistudio.google.com](https://aistudio.google.com/app/apikey). The app runs without it using the rule-based parser.
 
 ### Running Locally
 
@@ -157,19 +197,27 @@ GEMINI_API_KEY=your_api_key_here
 streamlit run app.py
 ```
 
-Open `http://localhost:8501`. Enable **"Use sample dataset"** in the sidebar to explore immediately, or upload your own `.xlsx` file.
+Open `http://localhost:8501`. Click **"Try Demo Dataset Instead"** on the landing page to explore immediately without uploading a file.
+
+### Running Tests
+
+```bash
+python -m pytest test_query_engine.py -v
+```
+
+Expected: **83 passed** in under 3 seconds.
 
 ---
 
 ## How It Works
 
-### 1. Upload and Schema Detection
+### 1 · Upload and Schema Detection
 
-When a file is uploaded, `utils.py` performs server-side validation (extension, file size), loads it via OpenPyXL, and runs dynamic schema detection. Column names are classified into semantic roles — budget, location, property type, status, contact, date — using keyword matching against the column headers. No column names are hardcoded.
+`utils.py` performs server-side validation (extension allowlist, file size limit), loads the file via OpenPyXL or the CSV parser, and runs dynamic schema detection. Column names are matched against keyword lists to assign semantic roles — budget, location, property type, status, contact, date. No column names are hardcoded anywhere in the codebase.
 
-### 2. Intent Classification
+### 2 · Intent Classification
 
-The user's natural language question is sent to Gemini along with the column names and detected schema (never the raw data). Gemini returns a structured JSON intent:
+The question is sent to Gemini with the column names and detected schema. The raw data is never included. Gemini returns a structured JSON intent:
 
 ```json
 {
@@ -182,144 +230,145 @@ The user's natural language question is sent to Gemini along with the column nam
 }
 ```
 
-The intent is validated against a strict allowlist of 17 operations before execution. If Gemini is unavailable, a rule-based parser extracts the operation from keywords and regex patterns.
+The response is validated against a 20-operation allowlist before any execution occurs. If validation fails, or if Gemini is unavailable, the rule-based parser in `query_engine.py` handles classification using keyword matching and regex patterns, including support for Indian numeric units (lakh, crore, k, million).
 
-### 3. Deterministic Execution
+### 3 · Deterministic Execution
 
-`query_engine.py` maps the validated intent to the corresponding Pandas operation:
+`query_engine.py` dispatches the validated intent to the corresponding handler:
 
 ```python
-# What actually runs for "customers in Pune with budget above 90 lakhs"
-df[df["Preferred Location"] == "Pune"]["Budget (INR)"] > 9000000
+# "customers in Pune with budget above 90 lakhs" executes as:
+filtered = df[df["Preferred Location"] == "Pune"]
+result   = filtered[pd.to_numeric(filtered["Budget (INR)"], errors="coerce") > 9_000_000]
 ```
 
-The engine tracks execution metadata: rows scanned, rows matched, filters applied, and wall-clock execution time in milliseconds.
+The engine records execution metadata: rows scanned, rows matched, filters applied, columns used, and wall-clock execution time in milliseconds. This data powers the audit trail displayed in the UI.
 
-### 4. Summarization
+### 4 · Summarization
 
-The raw Pandas result (the computed number or filtered DataFrame) is passed to Gemini with explicit instructions to phrase it naturally without altering any values. If Gemini is unavailable, a template-based summary is generated locally.
+The computed result — a scalar value or a preview of the filtered DataFrame — is passed to Gemini with explicit instructions to phrase it naturally without altering any values. If Gemini is unavailable, a template-based summary is generated locally from the result metadata.
 
-### 5. Visualization
+### 5 · Visualization
 
-`charts.py` inspects the result shape and operation type to select the appropriate chart: bar charts for rankings and groupings, pie charts for distributions, histograms for numeric spreads, box plots for comparisons. All charts use a dark-theme-compatible color palette.
+`charts.py` inspects the operation type and result shape to select the appropriate chart: bar charts for rankings and groupings, pie/donut charts for categorical distributions, histograms for numeric spreads, box plots for cross-sectional comparisons, and correlation heatmaps for multi-numeric datasets. All charts use a dark-theme-compatible color palette.
 
-### 6. Audit Trail
+### 6 · Conversational Context
 
-Every response includes an expandable execution details panel showing the full pipeline: intent classification method, exact Pandas operation, columns accessed, row counts, execution time, and the raw JSON intent.
+Filter conditions from the previous query are merged into the follow-up intent when the new query does not explicitly override them. This enables natural multi-turn conversations without requiring the user to repeat context.
 
 ---
 
 ## Supported Queries
 
-| Category | Example Query | Operation |
-|:---------|:-------------|:----------|
+| Category | Example | Operation |
+|:---------|:--------|:----------|
 | Count | "How many customers are there?" | `count` |
-| Count with filter | "How many customers are in Pune?" | `count` with condition |
+| Filtered count | "How many customers are in Pune?" | `count` + condition |
 | Average | "What is the average budget?" | `average` |
-| Sum | "What is the total budget for Kharadi?" | `sum` with condition |
+| Sum | "Total budget for Kharadi leads" | `sum` + condition |
 | Maximum | "Who has the highest budget?" | `max` |
 | Minimum | "What is the lowest budget?" | `min` |
-| Greater than | "Show customers with budget above 90 lakhs" | `greater_than` |
-| Less than | "List customers with budget under 50 lakhs" | `less_than` |
-| Range | "Customers with budget between 80 and 120 lakhs" | `between` |
+| Median | "What is the median budget?" | `median` |
+| Greater than | "Customers with budget above 90 lakhs" | `greater_than` |
+| Less than | "Leads with budget under 50 lakhs" | `less_than` |
+| Range | "Budget between 80 and 120 lakhs" | `between` |
 | Top N | "Top 5 customers by budget" | `topn` |
-| Bottom N | "Bottom 3 by budget" | `bottomn` |
-| Group by | "Average budget by location" | `groupby` + mean |
-| Distribution | "Breakdown of lead status" | `groupby` + count |
+| Bottom N | "Bottom 3 customers by budget" | `bottomn` |
 | Sort | "Sort customers by budget descending" | `sort` |
-| Unique values | "What are all the locations?" | `unique` |
+| Group by + aggregate | "Average budget by location" | `groupby` + mean |
+| Distribution | "Breakdown of lead status" | `groupby` + count |
+| Filter and list | "Show 2BHK customers in Baner" | `list` + conditions |
+| Unique values | "What locations are in the data?" | `unique` |
 | Distinct count | "How many unique locations?" | `distinct_count` |
 | Statistics | "Describe the budget column" | `describe` |
-| Filter + list | "Show 2BHK customers in Baner" | `list` with conditions |
+| Date filter | "Customers added after March" | `date_filter` |
+| Date — this month | "Show customers from this month" | `date_filter` |
+| Missing values | "Customers with missing phone number" | `missing` |
 
 ### Conversational Follow-ups
 
-The engine supports multi-turn context. Filters from a previous query carry forward when the follow-up implies continuation:
-
 ```
-> "Show me Pune customers"
-  → 45 rows
+User  ▸  "Show me Pune customers"
+Bot   ▸  45 rows found
 
-> "Only those above 90 lakhs"
-  → 12 rows (inherits Pune filter)
+User  ▸  "Only those above 90 lakhs"
+Bot   ▸  12 rows (Pune filter carried forward automatically)
 
-> "Sort them by budget"
-  → 12 rows sorted descending (inherits both filters)
+User  ▸  "Sort them by budget"
+Bot   ▸  12 rows sorted descending (both filters carried forward)
 ```
 
+---
 
 ## Technical Highlights
 
 ### Modular Architecture
 
-Each module has a single responsibility. The UI (`app.py`) never touches Pandas directly — it delegates to `query_engine.py`. Gemini calls are centralized in `gemini_helper.py` with a singleton configuration guard. Charts are decoupled in `charts.py`. All constants live in `config.py`.
+Each module has a single, clearly bounded responsibility. The UI layer (`app.py`) does not touch Pandas directly — all computation is delegated to `query_engine.py`. All Gemini calls are centralized in `gemini_helper.py`. Charts are fully decoupled in `charts.py`. All configuration constants live in `config.py`.
 
-### Caching
+### Caching Strategy
 
-Streamlit's `@st.cache_data` is used with content-hash keys (computed from DataFrame shape, columns, and dtypes) rather than hashing the full DataFrame. Gemini responses are cached with a configurable TTL (default: 1 hour).
+`@st.cache_data` is applied with a content-hash key derived from DataFrame shape, column names, column dtypes, and a sample of row values — rather than hashing the full DataFrame. Gemini API responses are cached with a configurable TTL (default: 1 hour) to avoid redundant API calls for repeated questions.
 
-### Error Handling
+### Error Handling and Resilience
 
-Every layer has fallback behavior. If Gemini fails, the rule-based parser handles intent classification. If summarization fails, a template-based summary is generated. If chart generation fails, the response is returned without a visualization. The application never crashes on a bad query.
-
-### Logging
-
-Structured Python `logging` is configured across all modules. API call latency, response sizes, query execution times, and error states are logged for observability.
+Every pipeline stage has a fallback. If Gemini fails → rule-based parser. If summarization fails → template summary. If chart generation fails → response returned without visualization. The application does not crash on any user input.
 
 ### Prompt Engineering
 
-System prompts enforce JSON-only output from Gemini. The model receives column names and schema metadata — never raw data rows. Intent validation rejects any operation not in the 17-item allowlist, preventing prompt injection from producing unauthorized operations.
+System prompts enforce JSON-only output from Gemini with schema-grounded instructions. The model is given column names and semantic roles, never row data. Responses are validated against a strict operation allowlist before execution, preventing prompt injection from producing unauthorized operations.
 
 ### Hallucination Prevention
 
-This is the core architectural decision. The system is designed so that it is structurally impossible for the LLM to produce a numeric answer:
+The architecture makes LLM hallucination structurally impossible for numeric answers:
 
-1. Gemini outputs a JSON intent (operation + column + conditions).
-2. The intent is validated against a strict allowlist.
-3. Pandas executes the operation deterministically.
-4. Gemini receives only the computed result for natural language phrasing.
+1. Gemini outputs a JSON intent describing *what* to compute.
+2. The intent is validated against a 20-item allowlist.
+3. Pandas executes the operation and produces the result.
+4. Gemini receives only the verified result for language rendering.
 
-At no point does the LLM have access to raw data or the ability to compute values.
+At no point does the LLM have access to the raw dataset or the ability to produce a numeric value independently.
 
 ### Security
 
-- File uploads are validated server-side for extension and size (configurable, default 50 MB)
-- API keys are loaded from `.env` files, never committed to version control
-- `.gitignore` prevents secrets, caches, and IDE files from leaking
-- Gemini SDK is configured once via a singleton guard
-- API calls use configurable timeouts and automatic retries
+- File uploads validated server-side for extension and size before any parsing occurs
+- API keys loaded from `.env` files; `.gitignore` excludes them from version control
+- Gemini SDK configured via a singleton guard that detects key rotation
+- All API calls use configurable timeouts and automatic retries with exponential backoff
 
 ---
 
 ## Design Philosophy
 
-Traditional LLM-powered data tools send raw CSVs to the model and ask it to compute answers. This approach is fundamentally unreliable:
+Traditional LLM-powered data tools send raw CSVs to the model and ask it to compute answers. This is fundamentally unreliable:
 
 | Concern | LLM Computation | Pandas Computation |
 |:--------|:----------------|:-------------------|
-| Accuracy | Probabilistic, prone to hallucination | Deterministic, exact |
-| Reproducibility | May vary between calls | Identical for identical inputs |
+| Accuracy | Probabilistic — prone to hallucination | Deterministic — exact |
+| Reproducibility | May differ between calls | Identical for identical inputs |
 | Auditability | Black box | Full execution trace available |
-| Cost per query | API tokens for data processing | Zero — local CPU |
-| Latency | Seconds (network + inference) | Milliseconds |
-| Data privacy | Raw data sent to external API | Data never leaves the process |
+| Cost per query | API tokens consumed for computation | Zero — local CPU |
+| Latency | Seconds (network + model inference) | Sub-millisecond |
+| Data privacy | Raw data transmitted to external API | Data never leaves the process |
 
-This application uses Gemini for what language models are genuinely good at — understanding natural language intent and generating fluent prose — while delegating computation to a tool purpose-built for it.
+This project uses Gemini for what language models genuinely excel at — understanding free-form human intent and generating fluent prose — and delegates all computation to a library purpose-built for it.
 
 ---
 
-## Future Improvements
+## Roadmap
 
-| Priority | Improvement | Description |
-|:---------|:------------|:------------|
-| High | Automated tests | pytest suite covering all 17 query engine operations |
-| High | CI/CD pipeline | GitHub Actions for linting, testing, and deployment |
-| Medium | Multi-sheet support | Load multiple sheets with cross-sheet join detection |
-| Medium | Database connectors | Direct connections to PostgreSQL, Snowflake, BigQuery |
-| Medium | Streaming responses | Token-by-token Gemini output with typewriter effect |
-| Low | User-editable schema | Manual override for auto-detected column roles |
-| Low | Persistent history | SQLite-backed chat history across sessions |
-| Low | Natural language charts | "Show me a pie chart of locations" |
+| Status | Item | Description |
+|:------:|:-----|:------------|
+| ✅ Done | Test suite | 83 automated tests covering all 20 operations, parsers, and edge cases |
+| ✅ Done | CSV support | Accept `.csv` files alongside Excel |
+| ✅ Done | Correlation heatmap | Auto-generated for datasets with 2+ numeric columns |
+| ✅ Done | Chat export | Download full session as a Markdown report |
+| 🔲 Planned | CI/CD pipeline | GitHub Actions for lint, test, and deploy on push |
+| 🔲 Planned | Multi-sheet Excel | Load and query across multiple sheets with join detection |
+| 🔲 Planned | Database connectors | Direct connections to PostgreSQL, BigQuery, Snowflake |
+| 🔲 Planned | Streaming output | Token-by-token Gemini response with typewriter rendering |
+| 🔲 Planned | Schema overrides | Manual correction of auto-detected column roles |
+| 🔲 Planned | Persistent history | SQLite-backed cross-session chat and query history |
 
 ---
 
@@ -327,19 +376,31 @@ This application uses Gemini for what language models are genuinely good at — 
 
 Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit your changes: `git commit -m "Add your feature"`
-4. Push to the branch: `git push origin feature/your-feature`
-5. Open a pull request
+```bash
+# 1. Fork and clone
+git clone https://github.com/your-username/Customer-Data-AI-Assistant.git
 
-Please ensure your code follows the existing style conventions and includes appropriate docstrings.
+# 2. Create a feature branch
+git checkout -b feature/your-feature-name
 
+# 3. Make changes, then run the test suite
+python -m pytest test_query_engine.py -v
 
+# 4. Push and open a pull request
+git push origin feature/your-feature-name
+```
+
+Please ensure new query engine operations include corresponding tests in `test_query_engine.py` and docstrings in `query_engine.py`.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
 
 <div align="center">
-
-**Customer Data AI Assistant**
 
 Built with [Streamlit](https://streamlit.io) · [Pandas](https://pandas.pydata.org) · [Plotly](https://plotly.com) · [Google Gemini](https://ai.google.dev)
 
