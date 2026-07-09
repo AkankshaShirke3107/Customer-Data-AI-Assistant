@@ -153,8 +153,11 @@ def auto_visualize(
 
         if operation == "unique" and table is not None and len(table.columns) == 1:
             col = table.columns[0]
+            # Cap at 30 items to keep the chart readable
+            display_table = table.head(30)
+            suffix = f" (top 30 of {len(table)})" if len(table) > 30 else ""
             fig = px.bar(
-                table, x=col, title=f"Unique values of {col}",
+                display_table, x=col, title=f"Unique values of {col}{suffix}",
                 color_discrete_sequence=["#8B5CF6"],
             )
             return _apply_layout(fig, xaxis_tickangle=-40)
@@ -230,5 +233,25 @@ def profile_overview_charts(
         figs["budget_by_location_box"] = _apply_layout(
             fig, xaxis_tickangle=-40, showlegend=False,
         )
+
+    # Correlation heatmap for datasets with 2+ numeric columns
+    numeric_df = df.select_dtypes(include="number")
+    if len(numeric_df.columns) >= 2:
+        corr = numeric_df.corr(numeric_only=True).round(2)
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=corr.values,
+                x=list(corr.columns),
+                y=list(corr.index),
+                colorscale="RdBu",
+                zmid=0,
+                text=corr.values,
+                texttemplate="%{text:.2f}",
+                hoverongaps=False,
+                colorbar=dict(tickfont=dict(color="#71717A")),
+            )
+        )
+        fig.update_layout(title="Correlation Matrix")
+        figs["correlation_heatmap"] = _apply_layout(fig)
 
     return figs
