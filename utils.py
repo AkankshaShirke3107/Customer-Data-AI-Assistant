@@ -123,18 +123,25 @@ def validate_upload(file) -> None:
 
 
 def load_dataframe(file) -> pd.DataFrame:
-    """Load an uploaded Excel file (path or file-like object) into a DataFrame.
+    """Load an uploaded Excel or CSV file (path or file-like object) into a DataFrame.
 
     Raises a ValueError with a friendly message on failure so the UI layer
     can surface it cleanly instead of a raw traceback.
     """
+    name = getattr(file, "name", "")
+    ext = os.path.splitext(name)[1].lower() if name else ""
+
     try:
-        df = pd.read_excel(file, engine="openpyxl")
+        if ext == ".csv":
+            df = pd.read_csv(file, encoding_errors="replace")
+        else:
+            engine = "xlrd" if ext == ".xls" else "openpyxl"
+            df = pd.read_excel(file, engine=engine)
     except Exception as exc:  # noqa: BLE001 – we want a friendly wrapper
-        raise ValueError(f"Could not read the Excel file: {exc}") from exc
+        raise ValueError(f"Could not read the file: {exc}") from exc
 
     if df.empty:
-        raise ValueError("The uploaded Excel file has no data rows.")
+        raise ValueError("The uploaded file has no data rows.")
 
     # Drop fully-empty columns/rows that sometimes appear from Excel exports
     df = df.dropna(axis=1, how="all")
