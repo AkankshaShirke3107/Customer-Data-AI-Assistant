@@ -355,23 +355,6 @@ This project uses Gemini for what language models genuinely excel at — underst
 
 ---
 
-## Roadmap
-
-| Status | Item | Description |
-|:------:|:-----|:------------|
-| ✅ Done | Test suite | 83 automated tests covering all 20 operations, parsers, and edge cases |
-| ✅ Done | CSV support | Accept `.csv` files alongside Excel |
-| ✅ Done | Correlation heatmap | Auto-generated for datasets with 2+ numeric columns |
-| ✅ Done | Chat export | Download full session as a Markdown report |
-| 🔲 Planned | CI/CD pipeline | GitHub Actions for lint, test, and deploy on push |
-| 🔲 Planned | Multi-sheet Excel | Load and query across multiple sheets with join detection |
-| 🔲 Planned | Database connectors | Direct connections to PostgreSQL, BigQuery, Snowflake |
-| 🔲 Planned | Streaming output | Token-by-token Gemini response with typewriter rendering |
-| 🔲 Planned | Schema overrides | Manual correction of auto-detected column roles |
-| 🔲 Planned | Persistent history | SQLite-backed cross-session chat and query history |
-
----
-
 ## Contributing
 
 Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
