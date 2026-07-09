@@ -47,6 +47,7 @@ OPERATIONS: set[str] = {
     "unique", "distinct_count", "describe", "list", "date_filter",
     "missing",
 }
+MAX_QUERY_STEPS: int = 5  # upper bound on chained query steps
 
 # ---------------------------------------------------------------------------
 # Logging

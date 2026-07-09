@@ -33,6 +33,7 @@ from config import (
     GEMINI_MAX_RETRIES,
     GEMINI_MODEL,
     GEMINI_TIMEOUT_SECONDS,
+    MAX_QUERY_STEPS,
     OPERATIONS,
 )
 
@@ -69,14 +70,14 @@ def _ensure_sdk_configured(api_key: str) -> None:
 _INTENT_SYSTEM_PROMPT = """You are a strict intent-classification engine for a
 data analysis tool. You NEVER answer questions yourself and you NEVER invent
 numbers. Your only job is to map a user's natural language question about a
-spreadsheet into a single JSON object describing which pandas operation to
-run.
+spreadsheet into a JSON object describing which pandas operation(s) to run.
 
 The dataframe has these columns: {columns}
 Semantic role hints (best guess, may be incomplete): {schema}
 
-Return ONLY a single valid JSON object (no markdown fences, no prose) with
-this shape:
+--- Single-operation format (use when the question needs one operation) ---
+
+Return a single JSON object with this shape:
 {{
   "operation": one of {ops},
   "column": "<column name or null>",
@@ -92,7 +93,26 @@ this shape:
   ]
 }}
 
+--- Multi-step format (use ONLY when the question chains multiple sequential
+    operations, e.g. "filter X then sort by Y then top 5") ---
+
+Return:
+{{
+  "steps": [
+    {{<single-operation object as above>}},
+    {{<single-operation object as above>}},
+    ...
+  ]
+}}
+
+Each element of "steps" has the exact same shape as the single-operation
+format.  The result of step i is fed as the working dataset for step i+1.
+Use at most {max_steps} steps.
+
 Rules:
+- Use the multi-step format ONLY when the question genuinely requires
+  chaining.  For simple questions (e.g. "how many customers?"), always
+  return the single-operation format.
 - "column" must be copied as close as possible from the real column list above; if unsure, guess the closest match.
 - If the question implies multiple filters (e.g. "2BHK in Pune"), put both as separate entries in "conditions".
 - If the question asks for a count, use "count". If it asks to "list" or "show me" records, use "list".
@@ -174,8 +194,8 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _validate_intent(intent: dict) -> dict:
-    """Sanitize and validate a parsed intent dict before execution.
+def _validate_single_intent(intent: dict) -> dict:
+    """Sanitize and validate a single-operation intent dict.
 
     - Ensures `operation` is in the allowed set.
     - Strips any unexpected top-level keys.
@@ -195,6 +215,36 @@ def _validate_intent(intent: dict) -> dict:
     return {k: v for k, v in intent.items() if k in allowed_keys}
 
 
+def _validate_intent(intent: dict) -> dict:
+    """Validate an intent dict, handling both single-operation and
+    multi-step (``{"steps": [...]}``)) shapes.
+
+    For multi-step intents each step is validated individually.
+    Returns the validated intent (same top-level shape as the input).
+    """
+    if "steps" in intent:
+        steps = intent["steps"]
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("'steps' must be a non-empty list.")
+        if len(steps) > MAX_QUERY_STEPS:
+            raise ValueError(
+                f"Too many steps ({len(steps)}). "
+                f"Maximum: {MAX_QUERY_STEPS}."
+            )
+        validated_steps = []
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                raise ValueError(f"Step {i + 1} is not a valid object.")
+            try:
+                validated_steps.append(_validate_single_intent(step))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Step {i + 1} validation failed: {exc}"
+                ) from exc
+        return {"steps": validated_steps}
+    return _validate_single_intent(intent)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -211,6 +261,7 @@ def understand_intent(question: str, columns: list[str], schema_dict: dict) -> d
         columns=json.dumps(columns),
         schema=json.dumps(schema_dict),
         ops=json.dumps(_ALLOWED_OPS),
+        max_steps=MAX_QUERY_STEPS,
     )
     full_prompt = f"{prompt}\n\nUser question: {question}\nJSON:"
     raw_text = _call_with_retry(client, full_prompt)

@@ -15,15 +15,17 @@ import math
 import pandas as pd
 import pytest
 
-from config import OPERATIONS
+from config import MAX_QUERY_STEPS, OPERATIONS
 from query_engine import (
     QueryEngine,
     QueryResult,
+    StepTrace,
     _extract_numbers_with_shared_units,
     _match_categorical_conditions,
     _parse_number_with_unit,
     merge_follow_up_conditions,
     rule_based_intent,
+    validate_chain_intent,
 )
 from utils import DatasetSchema, detect_schema
 
@@ -563,3 +565,155 @@ class TestEdgeCases:
         result = engine.execute({"operation": "count"})
         assert result.success
         assert result.scalar_result == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Chained Execution
+# ---------------------------------------------------------------------------
+class TestChainedExecution:
+    """Tests for the execute_chain() method and multi-step pipeline."""
+
+    def test_two_step_filter_sort(self, engine, schema):
+        """Filter by location, then sort by budget descending."""
+        steps = [
+            {"operation": "filter", "conditions": [
+                {"column": "Preferred Location", "op": "eq", "value": "Pune"},
+            ]},
+            {"operation": "sort", "column": schema.primary_budget_col, "ascending": False},
+        ]
+        result = engine.execute_chain(steps)
+        assert result.success
+        assert len(result.table_result) == 3  # Alice, Bob, Diana in Pune
+        vals = result.table_result[schema.primary_budget_col].dropna().tolist()
+        assert vals == sorted(vals, reverse=True)
+
+    def test_three_step_filter_sort_topn(self, engine, schema):
+        """Filter -> sort -> top 2."""
+        steps = [
+            {"operation": "filter", "conditions": [
+                {"column": "Preferred Location", "op": "eq", "value": "Pune"},
+            ]},
+            {"operation": "sort", "column": schema.primary_budget_col, "ascending": False},
+            {"operation": "topn", "column": schema.primary_budget_col, "n": 2},
+        ]
+        result = engine.execute_chain(steps)
+        assert result.success
+        assert len(result.table_result) == 2
+        # Should be the top-2 Pune customers by budget: Bob (9M) and Diana (7.5M)
+        names = result.table_result["Customer Name"].tolist()
+        assert "Bob" in names
+        assert "Diana" in names
+
+    def test_chain_empty_intermediate(self, engine, schema):
+        """Filter that produces zero rows -> sort should return empty gracefully."""
+        steps = [
+            {"operation": "filter", "conditions": [
+                {"column": "Preferred Location", "op": "eq", "value": "Narnia"},
+            ]},
+            {"operation": "sort", "column": schema.primary_budget_col, "ascending": False},
+        ]
+        result = engine.execute_chain(steps)
+        assert result.success
+        assert result.table_result is not None
+        assert len(result.table_result) == 0
+
+    def test_chain_nonexistent_column_step2(self, engine):
+        """Step 2 references a non-existent column -> graceful error."""
+        steps = [
+            {"operation": "filter", "conditions": [
+                {"column": "Preferred Location", "op": "eq", "value": "Pune"},
+            ]},
+            {"operation": "sort", "column": "NonExistentColumn", "ascending": False},
+        ]
+        result = engine.execute_chain(steps)
+        # Sort with unresolved column falls back to default; should not crash
+        assert result.success or result.error is not None
+        assert not isinstance(result, type(None))
+
+    def test_chain_single_step_identical(self, engine, schema):
+        """A single-step chain produces identical output to direct execute()."""
+        intent = {"operation": "count", "conditions": [
+            {"column": "Preferred Location", "op": "eq", "value": "Pune"},
+        ]}
+        direct = engine.execute(intent)
+        chained = engine.execute_chain([intent])
+        assert direct.scalar_result == chained.scalar_result
+        assert direct.operation == chained.operation
+
+    def test_chain_step_trace_populated(self, engine, schema):
+        """Verify step_trace has correct length and fields."""
+        steps = [
+            {"operation": "filter", "conditions": [
+                {"column": "Preferred Location", "op": "eq", "value": "Pune"},
+            ]},
+            {"operation": "sort", "column": schema.primary_budget_col, "ascending": False},
+        ]
+        result = engine.execute_chain(steps)
+        assert len(result.step_trace) == 2
+        assert result.step_trace[0].operation == "filter"
+        assert result.step_trace[1].operation == "sort"
+        assert result.step_trace[0].rows_before == 5  # full dataset
+        assert result.step_trace[0].rows_after == 3   # Pune only
+        assert result.step_trace[1].rows_before == 3  # input from step 1
+
+
+class TestValidateChainIntent:
+    """Tests for validate_chain_intent()."""
+
+    def test_max_steps_exceeded(self):
+        """Chain with > MAX_QUERY_STEPS should be rejected."""
+        too_many = {"steps": [{"operation": "count"}] * (MAX_QUERY_STEPS + 1)}
+        with pytest.raises(ValueError, match="Too many steps"):
+            validate_chain_intent(too_many)
+
+    def test_invalid_step_operation(self):
+        bad = {"steps": [{"operation": "nonexistent"}]}
+        with pytest.raises(ValueError, match="invalid operation"):
+            validate_chain_intent(bad)
+
+
+# ---------------------------------------------------------------------------
+# Test: Rule-Based Chain Parsing
+# ---------------------------------------------------------------------------
+class TestRuleBasedChain:
+    def test_then_sort(self, schema, sample_df):
+        """'show pune customers then sort by budget' -> multi-step."""
+        intent = rule_based_intent(
+            "show pune customers then sort by budget", schema, sample_df
+        )
+        assert "steps" in intent
+        assert len(intent["steps"]) == 2
+
+    def test_then_top(self, schema, sample_df):
+        """'show pune customers then top 5' -> multi-step."""
+        intent = rule_based_intent(
+            "show pune customers then top 5", schema, sample_df
+        )
+        assert "steps" in intent
+        assert len(intent["steps"]) == 2
+        assert intent["steps"][1]["operation"] == "topn"
+
+    def test_no_chain_single_op(self, schema, sample_df):
+        """'what is the average budget' -> single intent (no steps)."""
+        intent = rule_based_intent(
+            "what is the average budget", schema, sample_df
+        )
+        assert "steps" not in intent
+        assert intent["operation"] == "average"
+
+
+# ---------------------------------------------------------------------------
+# Test: Single-Operation Regression Guard
+# ---------------------------------------------------------------------------
+class TestSingleOpRegression:
+    def test_count_with_filter_unchanged(self, engine):
+        """Verify count+filter produces IDENTICAL output after chaining changes."""
+        result = engine.execute({
+            "operation": "count",
+            "conditions": [{"column": "Preferred Location", "op": "eq", "value": "Pune"}],
+        })
+        assert result.success
+        assert result.scalar_result == 3
+        assert result.step_trace == []  # single-op must have empty trace
+        assert result.rows_scanned == 5
+        assert result.filters_applied == 1

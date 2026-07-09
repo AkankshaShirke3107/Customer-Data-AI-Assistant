@@ -21,10 +21,21 @@ from typing import Any
 
 import pandas as pd
 
-from config import OPERATIONS
+from config import MAX_QUERY_STEPS, OPERATIONS
 from utils import DatasetSchema, resolve_column
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StepTrace:
+    """Summary of a single step in a chained query execution."""
+    step_number: int
+    operation: str
+    rows_before: int
+    rows_after: int
+    explanation: str
+    execution_time_ms: float
 
 
 @dataclass
@@ -42,6 +53,7 @@ class QueryResult:
     filters_applied: int = 0      # number of filter conditions applied
     rows_scanned: int = 0         # rows in the source before filters
     rows_matched: int = 0         # rows after filters
+    step_trace: list[StepTrace] = field(default_factory=list)  # populated by execute_chain()
 
 
 class QueryEngine:
@@ -170,6 +182,93 @@ class QueryEngine:
                 error=f"Could not execute query: {exc}",
                 execution_time_ms=elapsed,
             )
+
+    # ------------------------------------------------------------------
+    # Chained execution
+    # ------------------------------------------------------------------
+    def execute_chain(self, steps: list[dict]) -> QueryResult:
+        """Execute a sequence of chained operations.
+
+        Each step is a standard intent dict (same shape as accepted by
+        ``execute()``).  The table result of step *i* becomes the working
+        DataFrame for step *i + 1*.  The final step's ``QueryResult`` is
+        returned with a populated ``step_trace`` list so the UI can
+        display the full audit trail.
+
+        Supported intent shapes (both are accepted):
+
+        Legacy single-operation (routed through ``execute()`` directly)::
+
+            {"operation": "count", "column": "Budget", "conditions": [...]}
+
+        Multi-step chain (routed through this method)::
+
+            {"steps": [
+                {"operation": "filter", "conditions": [...]},
+                {"operation": "sort", "column": "Budget", "ascending": false},
+                {"operation": "topn", "column": "Budget", "n": 5}
+            ]}
+        """
+        trace: list[StepTrace] = []
+        working_df = self.df
+        final_result: QueryResult | None = None
+        t0_chain = time.time()
+
+        for i, step in enumerate(steps):
+            rows_before = len(working_df)
+            step_engine = QueryEngine(working_df, self.schema)
+            result = step_engine.execute(step)
+
+            rows_after = (
+                len(result.table_result)
+                if result.table_result is not None
+                else 0
+            )
+            trace.append(StepTrace(
+                step_number=i + 1,
+                operation=step.get("operation", "unknown"),
+                rows_before=rows_before,
+                rows_after=rows_after,
+                explanation=result.explanation,
+                execution_time_ms=result.execution_time_ms,
+            ))
+
+            if not result.success:
+                result.step_trace = trace
+                result.error = (
+                    f"Step {i + 1} ({step.get('operation', 'unknown')}) failed: "
+                    f"{result.error}"
+                )
+                logger.warning(
+                    "Chain aborted at step %d/%d: %s",
+                    i + 1, len(steps), result.error,
+                )
+                return result
+
+            # Propagate table to next step
+            if result.table_result is not None:
+                working_df = result.table_result
+
+            final_result = result
+
+        # Should never be None here (steps is validated non-empty), but
+        # guard defensively.
+        if final_result is None:  # pragma: no cover
+            return QueryResult(
+                operation="chain", success=False,
+                error="Chain produced no result (empty steps list).",
+            )
+
+        final_result.step_trace = trace
+        final_result.execution_time_ms = round(
+            (time.time() - t0_chain) * 1000, 1,
+        )
+        final_result.rows_scanned = len(self.df)
+        logger.info(
+            "Chain executed: %d steps, total_time=%.1fms",
+            len(steps), final_result.execution_time_ms,
+        )
+        return final_result
 
     # ------------------------------------------------------------------
     # Operation handlers – each returns a QueryResult
@@ -646,11 +745,41 @@ _MONTH_MAP: dict[str, str] = {
 }
 
 
-def rule_based_intent(
+def validate_chain_intent(intent: dict) -> list[dict]:
+    """Validate a multi-step intent and return the sanitized steps list.
+
+    Raises ValueError if the structure is malformed.
+    """
+    steps = intent.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("'steps' must be a non-empty list of operation dicts.")
+    if len(steps) > MAX_QUERY_STEPS:
+        raise ValueError(
+            f"Too many steps ({len(steps)}). "
+            f"Maximum allowed is {MAX_QUERY_STEPS}."
+        )
+    validated: list[dict] = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise ValueError(f"Step {i + 1} is not a valid object.")
+        op = (step.get("operation") or "").lower().strip()
+        if op not in OPERATIONS:
+            raise ValueError(
+                f"Step {i + 1} has invalid operation '{op}'. "
+                f"Allowed: {sorted(OPERATIONS)}"
+            )
+        validated.append(step)
+    return validated
+
+
+def _parse_single_intent(
     question: str, schema: DatasetSchema, df: pd.DataFrame | None = None
 ) -> dict[str, Any]:
-    """A conservative keyword-based fallback so the app still works
-    without an LLM (or if the Gemini call fails / quota is exceeded).
+    """Parse a single-operation intent from the question.
+
+    This is the core keyword-based matching logic, extracted so that
+    ``rule_based_intent`` can call it for each segment of a chained
+    question while keeping the public API unchanged.
     """
     q = question.lower()
     budget_col = schema.primary_budget_col
@@ -759,3 +888,31 @@ def rule_based_intent(
     if categorical_conditions or "list" in q or "show" in q or "give me" in q or "interested" in q:
         return {"operation": "list", "conditions": categorical_conditions, "n": 50}
     return {"operation": "list", "conditions": categorical_conditions, "n": 20}
+
+
+# Regex for detecting chain boundaries in natural-language questions.
+# Matches " then ", " and then ", or ", then " as step separators.
+_CHAIN_SPLIT_RE = re.compile(r",?\s+(?:and\s+)?then\s+", re.IGNORECASE)
+
+
+def rule_based_intent(
+    question: str, schema: DatasetSchema, df: pd.DataFrame | None = None
+) -> dict[str, Any]:
+    """A conservative keyword-based fallback so the app still works
+    without an LLM (or if the Gemini call fails / quota is exceeded).
+
+    If the question contains chain markers (e.g. "… then sort by …"),
+    each segment is parsed independently and returned as
+    ``{"steps": [intent1, intent2, …]}``.  Otherwise a single intent
+    dict is returned in the legacy format.
+    """
+    parts = _CHAIN_SPLIT_RE.split(question)
+    if len(parts) > 1:
+        steps = [
+            _parse_single_intent(part.strip(), schema, df)
+            for part in parts
+            if part.strip()
+        ]
+        if len(steps) > 1:
+            return {"steps": steps[:MAX_QUERY_STEPS]}
+    return _parse_single_intent(question, schema, df)

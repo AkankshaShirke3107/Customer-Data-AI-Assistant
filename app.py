@@ -23,7 +23,7 @@ from config import (
     CACHE_TTL_SECONDS, DATA_PREVIEW_ROWS, LOG_FORMAT, LOG_LEVEL,
     MAX_CHAT_HISTORY, TABLE_DISPLAY_ROWS,
 )
-from query_engine import QueryEngine, merge_follow_up_conditions, rule_based_intent
+from query_engine import QueryEngine, merge_follow_up_conditions, rule_based_intent, validate_chain_intent
 from utils import detect_schema, load_dataframe, profile_dataset, rule_based_insights, validate_upload
 
 load_dotenv()
@@ -474,6 +474,17 @@ with col_main:
             unsafe_allow_html=True,
         )
 
+        # Step trace (multi-step chains only)
+        if _result.step_trace:
+            with st.expander(f"🔗 Execution Pipeline — {len(_result.step_trace)} steps", expanded=False):
+                for _st in _result.step_trace:
+                    st.markdown(
+                        f"**Step {_st.step_number}** · `{_e(_st.operation)}` · "
+                        f"{_st.rows_before} → {_st.rows_after} rows · "
+                        f"{_st.execution_time_ms}ms",
+                    )
+                    st.caption(_e(_st.explanation))
+
         # Table result
         if _result.success and _result.table_result is not None and not _result.table_result.empty:
             st.dataframe(_result.table_result.head(TABLE_DISPLAY_ROWS), use_container_width=True)
@@ -562,7 +573,18 @@ with col_main:
                 _intent     = merge_follow_up_conditions(_intent, _prev_cond)
 
             _engine  = QueryEngine(df, schema)
-            _result  = _engine.execute(_intent)
+            if "steps" in _intent:
+                try:
+                    _validated_steps = validate_chain_intent(_intent)
+                except ValueError as _ve:
+                    logger.warning("Chain validation failed: %s", _ve)
+                    _intent = rule_based_intent(_final_q, schema, df)
+                if "steps" in _intent:
+                    _result = _engine.execute_chain(_intent["steps"])
+                else:
+                    _result = _engine.execute(_intent)
+            else:
+                _result  = _engine.execute(_intent)
 
             _summary      = None
             _used_gem_sum = False
