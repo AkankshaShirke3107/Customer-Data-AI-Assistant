@@ -16,7 +16,7 @@ import os
 # ---------------------------------------------------------------------------
 MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
 MAX_UPLOAD_SIZE_BYTES: int = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-ALLOWED_EXTENSIONS: set[str] = {".xlsx", ".xls"}
+ALLOWED_EXTENSIONS: set[str] = {".xlsx", ".xls", ".csv"}
 
 # ---------------------------------------------------------------------------
 # Chat / session limits
@@ -42,9 +42,10 @@ DEFAULT_CHART_MARGIN: dict = dict(l=10, r=10, t=50, b=10)
 # Query engine
 # ---------------------------------------------------------------------------
 OPERATIONS: set[str] = {
-    "count", "sum", "average", "min", "max", "filter", "sort", "groupby",
-    "topn", "bottomn", "between", "greater_than", "less_than", "unique",
-    "distinct_count", "describe", "list",
+    "count", "sum", "average", "median", "min", "max", "filter", "sort",
+    "groupby", "topn", "bottomn", "between", "greater_than", "less_than",
+    "unique", "distinct_count", "describe", "list", "date_filter",
+    "missing",
 }
 
 # ---------------------------------------------------------------------------
