@@ -181,6 +181,8 @@ def fallback_summary(question: str, result) -> str:
             val = round(val, 2)
         return f"The answer is **{val}**."
     if result.table_result is not None:
+        if result.operation == "groupby":
+            return f"Here is the breakdown by category ({len(result.table_result)} groups found)."
         return f"I found **{len(result.table_result)} customers** matching your criteria."
     return "Done! Here are the results based on your dataset."
 
@@ -660,21 +662,21 @@ with col_main:
 
             # Conversational memory: merge previous filters
             if st.session_state.chat_history:
-                _prev       = st.session_state.chat_history[-1]
-                _prev_cond  = _prev.get("intent", {}).get("conditions", [])
-                _intent     = merge_follow_up_conditions(_intent, _prev_cond)
-                
+                _prev = st.session_state.chat_history[-1]
+                _prev_intent = _prev.get("intent")
+                _prev_cond = getattr(_prev_intent, "conditions", []) if _prev_intent else []
+                _intent = merge_follow_up_conditions(_intent, _prev_cond)
             _value_index = cached_value_index(_df_hash(df), df, schema.categorical_cols)
 
             _engine  = QueryEngine(df, schema, value_index=_value_index)
-            if "steps" in _intent:
+            if _intent.steps:
                 try:
                     _validated_steps = validate_chain_intent(_intent)
                 except ValueError as _ve:
                     logger.warning("Chain validation failed: %s", _ve)
                     _intent = rule_based_intent(_final_q, schema, df)
-                if "steps" in _intent:
-                    _result = _engine.execute_chain(_intent["steps"])
+                if _intent.steps:
+                    _result = _engine.execute_chain(_intent.steps)
                 else:
                     _result = _engine.execute(_intent)
             else:

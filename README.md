@@ -14,7 +14,7 @@ Every answer is computed by Pandas and verified before Gemini phrases it.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/streamlit-1.38+-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
 [![Google Gemini](https://img.shields.io/badge/gemini-2.5--flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
-[![Tests](https://img.shields.io/badge/tests-125_passed-22C55E?style=flat-square)](test_query_engine.py)
+[![Tests](https://img.shields.io/badge/tests-125_passed-22C55E?style=flat-square)](test_operations.py)
 [![License: MIT](https://img.shields.io/badge/license-MIT-A78BFA?style=flat-square)](LICENSE)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [How It Works](#how-it-works) · [Supported Queries](#supported-queries)

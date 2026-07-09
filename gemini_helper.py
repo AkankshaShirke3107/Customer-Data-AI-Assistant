@@ -116,6 +116,7 @@ Rules:
 - "column" must be copied as close as possible from the real column list above; if unsure, guess the closest match.
 - If the question implies multiple filters (e.g. "2BHK in Pune"), put both as separate entries in "conditions".
 - If the question asks for a count, use "count". If it asks to "list" or "show me" records, use "list".
+- If the question asks to count occurrences PER category or asks for the most/least common category (e.g., "how many customers per city", "most popular location", "how many prefer each type"), use "groupby" with agg_func="count".
 - If the question compares a group (e.g. "average budget by city"), use "groupby".
 - Never fabricate a numeric answer yourself; only describe the operation.
 - Respond with JSON only.

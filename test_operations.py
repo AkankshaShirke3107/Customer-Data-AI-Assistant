@@ -1,5 +1,5 @@
 """
-test_query_engine.py
+test_operations.py
 --------------------
 Comprehensive test suite for the deterministic query engine.
 
@@ -14,7 +14,7 @@ import pytest
 import math
 from unittest.mock import patch, MagicMock
 from config import MAX_QUERY_STEPS, OPERATIONS
-from query_engine import QueryEngine, QueryResult, StepTrace, _extract_numbers_with_shared_units, _match_categorical_conditions, _parse_number_with_unit, merge_follow_up_conditions, rule_based_intent, validate_chain_intent, execute_sandboxed, run_dynamic_query
+from operations import QueryEngine, QueryResult, StepTrace, _extract_numbers_with_shared_units, _match_categorical_conditions, _parse_number_with_unit, merge_follow_up_conditions, rule_based_intent, validate_chain_intent
 from utils import DatasetSchema, detect_schema
 
 @pytest.fixture
@@ -199,9 +199,17 @@ class TestOperationMinMax:
 class TestOperationFilter:
 
     def test_greater_than(self, engine, schema):
-        result = engine.execute(RootIntentModel.model_validate({'operation': 'greater_than', 'column': schema.primary_budget_col, 'value': 8000000}))
+        intent = RootIntentModel.model_validate({'operation': 'greater_than', 'column': schema.primary_budget_col, 'value': 8000000.0})
+        result = engine.execute(intent)
         assert result.success
         assert result.scalar_result == 2
+
+    def test_greater_than_with_currency_string(self, engine, schema):
+        intent = RootIntentModel.model_validate({'operation': 'greater_than', 'column': schema.primary_budget_col, 'value': '₹80L'})
+        result = engine.execute(intent)
+        assert result.success
+        assert result.scalar_result == 2  # Same as 8000000
+
 
     def test_less_than(self, engine, schema):
         result = engine.execute(RootIntentModel.model_validate({'operation': 'less_than', 'column': schema.primary_budget_col, 'value': 8000000}))
@@ -312,8 +320,8 @@ class TestOperationDateFilter:
 class TestUnknownOperation:
 
     def test_unknown_op_fails(self, engine):
-        result = engine.execute(RootIntentModel.model_validate({'operation': 'nonexistent'}))
-        assert not result.success
+        result = engine.execute({'operation': 'nonexistent'})
+        assert result.success is False
         assert 'Unrecognized operation' in result.error
 
     def test_empty_op_fails(self, engine):
@@ -371,6 +379,35 @@ class TestRuleBasedIntent:
         assert intent.value == 5000000
         assert intent.value2 == 9000000
 
+    def test_groupby_breakdown(self, schema, sample_df):
+        intent = rule_based_intent("show budget distribution", schema, sample_df)
+        assert intent.operation == "groupby"
+        assert intent.agg_func == "count"
+
+    def test_groupby_each_property_type(self, schema, sample_df):
+        intent = rule_based_intent("How many customers prefer each Property Type?", schema, sample_df)
+        assert intent.operation == "groupby"
+        assert intent.group_by == schema.property_type_col
+        assert intent.agg_func == "count"
+
+    def test_groupby_most_customers_location(self, schema, sample_df):
+        intent = rule_based_intent("Which Location has the most customers?", schema, sample_df)
+        assert intent.operation == "groupby"
+        assert intent.group_by == schema.location_col
+        assert intent.agg_func == "count"
+
+    def test_groupby_count_by_status(self, schema, sample_df):
+        intent = rule_based_intent("Count customers by Call Status", schema, sample_df)
+        assert intent.operation == "groupby"
+        assert intent.group_by == schema.status_col
+        assert intent.agg_func == "count"
+
+    def test_groupby_least_common_type(self, schema, sample_df):
+        intent = rule_based_intent("Least common Property Type", schema, sample_df)
+        assert intent.operation == "groupby"
+        assert intent.group_by == schema.property_type_col
+        assert intent.agg_func == "count"
+
     def test_top_n(self, schema, sample_df):
         intent = rule_based_intent('top 5 customers by budget', schema, sample_df)
         assert intent.operation == 'topn'
@@ -400,7 +437,7 @@ class TestRuleBasedIntent:
         intent = rule_based_intent('show me customers in pune', schema, sample_df)
         assert intent.operation == 'list'
         conditions = intent.conditions
-        location_match = [c for c in conditions if 'pune' in str(c.get('value', '')).lower()]
+        location_match = [c for c in conditions if 'pune' in str(c.value).lower()]
         assert len(location_match) >= 1 or len(conditions) >= 0
 
     def test_missing_query(self, schema, sample_df):
@@ -422,20 +459,20 @@ class TestMergeFollowUp:
         new_intent = {'operation': 'count', 'conditions': []}
         prev = [{'column': 'Location', 'op': 'eq', 'value': 'Pune'}]
         merged = merge_follow_up_conditions(new_intent, prev)
-        assert len(merged['conditions']) == 1
-        assert merged['conditions'][0]['value'] == 'Pune'
+        assert len(merged.conditions) == 1
+        assert merged.conditions[0].value == 'Pune'
 
     def test_no_duplicate_merge(self):
         new_intent = {'operation': 'count', 'conditions': [{'column': 'Location', 'op': 'eq', 'value': 'Mumbai'}]}
         prev = [{'column': 'Location', 'op': 'eq', 'value': 'Pune'}]
         merged = merge_follow_up_conditions(new_intent, prev)
-        assert len(merged['conditions']) == 1
-        assert merged['conditions'][0]['value'] == 'Mumbai'
+        assert len(merged.conditions) == 1
+        assert merged.conditions[0].value == 'Mumbai'
 
     def test_empty_previous(self):
         new_intent = {'operation': 'count', 'conditions': []}
         merged = merge_follow_up_conditions(new_intent, [])
-        assert merged['conditions'] == []
+        assert merged.conditions == []
 
 class TestCategoricalMatching:
 
@@ -542,7 +579,7 @@ class TestValidateChainIntent:
 
     def test_invalid_step_operation(self):
         bad = {'steps': [{'operation': 'nonexistent'}]}
-        with pytest.raises(ValueError, match='invalid operation'):
+        with pytest.raises(ValueError, match='[Ii]nvalid operation'):
             validate_chain_intent(bad)
 
 class TestRuleBasedChain:
@@ -550,15 +587,15 @@ class TestRuleBasedChain:
     def test_then_sort(self, schema, sample_df):
         """'show pune customers then sort by budget' -> multi-step."""
         intent = rule_based_intent('show pune customers then sort by budget', schema, sample_df)
-        assert 'steps' in intent
+        assert intent.steps is not None
         assert len(intent.steps) == 2
 
     def test_then_top(self, schema, sample_df):
         """'show pune customers then top 5' -> multi-step."""
         intent = rule_based_intent('show pune customers then top 5', schema, sample_df)
-        assert 'steps' in intent
+        assert intent.steps is not None
         assert len(intent.steps) == 2
-        assert intent.steps[1]['operation'] == 'topn'
+        assert intent.steps[1].operation == 'topn'
 
     def test_no_chain_single_op(self, schema, sample_df):
         """'what is the average budget' -> single intent (no steps)."""
@@ -577,135 +614,267 @@ class TestSingleOpRegression:
         assert result.rows_scanned == 5
         assert result.filters_applied == 1
 
-class TestExecuteSandboxed:
 
-    def test_valid_aggregation(self, sample_df):
-        code = "result = df['Budget (INR)'].mean()"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is True
-        assert res['result'] == sample_df['Budget (INR)'].mean()
+class TestNoneColumnResolution:
+    """Phase 6.1: Edge cases where _numeric_col or _resolve returns None."""
 
-    def test_valid_filter(self, sample_df):
-        code = "df[df['Preferred Location'] == 'Pune']"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is True
-        assert len(res['result']) == 3
+    @pytest.fixture
+    def empty_schema_engine(self):
+        """Engine with a dataframe that has no numeric or categorical columns."""
+        df = pd.DataFrame({'JustStrings': ['a', 'b', 'c']})
+        schema = DatasetSchema(
+            name_col=None, primary_budget_col=None, location_col=None,
+            property_type_col=None, status_col=None, date_cols=[], contact_col=None, id_cols=[]
+        )
+        return QueryEngine(df, schema)
 
-    def test_missing_column(self, sample_df):
-        code = "df['Nonexistent'].sum()"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is False
-        assert res['error_type'] == 'KeyError'
+    def test_op_extremum_none_column(self, empty_schema_engine):
+        """_op_min with no numeric columns should fail gracefully."""
+        intent = RootIntentModel.model_validate({'operation': 'min'})
+        result = empty_schema_engine.execute(intent)
+        assert not result.success
+        assert "no numeric column found" in result.error.lower()
 
-    def test_sandbox_escape_import(self, sample_df):
-        code = "__import__('os').system('echo hacked')"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is False
-        assert 'NameError' in res['error_type'] or 'KeyError' in res['error_type'] or 'ImportError' in res['error_type']
+    def test_op_sort_none_column(self, empty_schema_engine):
+        """_op_sort with no column could be determined should fail gracefully."""
+        intent = RootIntentModel.model_validate({'operation': 'sort'})
+        result = empty_schema_engine.execute(intent)
+        assert not result.success
+        assert "no column could be determined" in result.error.lower()
+        assert intent.operation == 'date_filter'
+        assert intent.date_op == 'after'
 
-    def test_sandbox_escape_builtins(self, sample_df):
-        code = '().__class__.__bases__[0].__subclasses__()'
-        res = execute_sandboxed("eval('1+1')", sample_df)
-        assert res['success'] is False
-        assert 'NameError' in res['error_type']
+    def test_recent(self, schema, sample_df):
+        intent = rule_based_intent('show recent customers', schema, sample_df)
+        assert intent.operation == 'sort'
 
-    def test_sandbox_escape_getattr(self, sample_df):
-        code = "getattr(__builtins__, '__import__')('os')"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is False
+class TestMergeFollowUp:
 
-    def test_timeout(self, sample_df):
-        code = 'while True: pass'
-        res = execute_sandboxed(code, sample_df, timeout=1)
-        assert res['success'] is False
-        assert res['error_type'] == 'TimeoutError'
+    def test_merge_new_conditions(self):
+        new_intent = {'operation': 'count', 'conditions': []}
+        prev = [{'column': 'Location', 'op': 'eq', 'value': 'Pune'}]
+        merged = merge_follow_up_conditions(new_intent, prev)
+        assert len(merged.conditions) == 1
+        assert merged.conditions[0].value == 'Pune'
 
-    def test_result_capping(self):
-        large_df = pd.DataFrame({'A': range(100)})
-        code = 'df'
-        res = execute_sandboxed(code, large_df)
-        assert res['success'] is True
-        assert len(res['result']) == 50
+    def test_no_duplicate_merge(self):
+        new_intent = {'operation': 'count', 'conditions': [{'column': 'Location', 'op': 'eq', 'value': 'Mumbai'}]}
+        prev = [{'column': 'Location', 'op': 'eq', 'value': 'Pune'}]
+        merged = merge_follow_up_conditions(new_intent, prev)
+        assert len(merged.conditions) == 1
+        assert merged.conditions[0].value == 'Mumbai'
 
-    def test_df_not_mutated(self, sample_df):
-        code = "df['NewCol'] = 1; result = df"
-        copy_df = sample_df.copy()
-        res = execute_sandboxed(code, copy_df)
-        assert res['success'] is True
-        assert 'NewCol' not in copy_df.columns
-        assert 'NewCol' in res['result'].columns
+    def test_empty_previous(self):
+        new_intent = {'operation': 'count', 'conditions': []}
+        merged = merge_follow_up_conditions(new_intent, [])
+        assert merged.conditions == []
 
-    def test_nan_result(self, sample_df):
-        code = "result = float('nan')"
-        res = execute_sandboxed(code, sample_df)
-        assert res['success'] is True
-        assert math.isnan(res['result'])
+class TestCategoricalMatching:
 
-class TestRunDynamicQuery:
+    def test_match_location(self, schema, sample_df):
+        conditions = _match_categorical_conditions('customers in pune', schema, sample_df)
+        if schema.location_col:
+            location_conditions = [c for c in conditions if c.column == schema.location_col]
+            assert len(location_conditions) >= 1 or not any((v.lower() == 'pune' for v in sample_df[schema.location_col].dropna().astype(str).unique()))
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_success_first_attempt(self, mock_gen, sample_df, schema):
-        mock_gen.return_value = "df['Budget (INR)'].sum()"
-        res = run_dynamic_query('what is the total budget', sample_df, schema)
-        assert res.success is True
-        assert res.scalar_result == sample_df['Budget (INR)'].sum()
-        assert res.dynamic_retry_count == 0
+    def test_match_property_type(self, schema, sample_df):
+        conditions = _match_categorical_conditions('2 bhk in pune', schema, sample_df)
+        assert len(conditions) >= 1
 
-    @patch('gemini_helper.generate_corrected_code')
-    @patch('gemini_helper.generate_pandas_code')
-    def test_success_after_retry(self, mock_gen, mock_corr, sample_df, schema):
-        mock_gen.return_value = "df['BadCol'].sum()"
-        mock_corr.return_value = "df['Budget (INR)'].sum()"
-        res = run_dynamic_query('what is the total budget', sample_df, schema)
-        assert res.success is True
-        assert res.scalar_result == sample_df['Budget (INR)'].sum()
-        assert res.dynamic_retry_count == 1
+class TestEdgeCases:
 
-    @patch('gemini_helper.generate_corrected_code')
-    @patch('gemini_helper.generate_pandas_code')
-    def test_all_retries_exhausted(self, mock_gen, mock_corr, sample_df, schema):
-        mock_gen.return_value = "df['BadCol'].sum()"
-        mock_corr.return_value = "df['BadCol2'].sum()"
-        res = run_dynamic_query('what is the total budget', sample_df, schema, max_retries=1)
-        assert res.success is False
-        assert 'automatically generate a correct query' in res.error
-        assert res.dynamic_retry_count == 1
+    def test_empty_dataframe(self):
+        df = pd.DataFrame({'A': [], 'B': []})
+        schema = DatasetSchema(all_columns=['A', 'B'])
+        engine = QueryEngine(df, schema)
+        result = engine.execute(RootIntentModel.model_validate({'operation': 'count'}))
+        assert result.success
+        assert result.scalar_result == 0
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_gemini_unavailable(self, mock_gen, sample_df, schema):
-        import gemini_helper
-        mock_gen.side_effect = gemini_helper.GeminiUnavailableError('API Key missing')
-        res = run_dynamic_query('what is the total budget', sample_df, schema)
-        assert res.success is False
-        assert res.execution_path == 'dynamic'
-        assert 'Failed to generate query code' in res.error
+    def test_all_nan_column(self):
+        df = pd.DataFrame({'Budget': [None, None, None], 'Name': ['A', 'B', 'C']})
+        schema = detect_schema(df)
+        engine = QueryEngine(df, schema)
+        result = engine.execute(RootIntentModel.model_validate({'operation': 'average', 'column': 'Budget'}))
+        assert result.success
+        assert result.scalar_result is None or math.isnan(result.scalar_result)
 
-class TestDynamicIntegration:
+    def test_single_row(self):
+        df = pd.DataFrame({'Budget': [100], 'Name': ['Only']})
+        schema = detect_schema(df)
+        engine = QueryEngine(df, schema)
+        result = engine.execute(RootIntentModel.model_validate({'operation': 'count'}))
+        assert result.success
+        assert result.scalar_result == 1
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_compound_filter_groupby(self, mock_gen, sample_df, schema):
-        mock_gen.return_value = "df[df['Property Type'] == '2 BHK'].groupby('Preferred Location')['Budget (INR)'].mean().reset_index()"
-        res = run_dynamic_query('Average budget of 2BHK buyers in Pune', sample_df, schema)
-        assert res.success is True
-        assert res.table_result is not None
-        assert 'Preferred Location' in res.table_result.columns
+class TestChainedExecution:
+    """Tests for the execute_chain() method and multi-step pipeline."""
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_multi_condition_query(self, mock_gen, sample_df, schema):
-        mock_gen.return_value = "df[(df['Budget (INR)'] > 8000000) & (df['Call Status'] == 'Interested')]"
-        res = run_dynamic_query('Who is interested and has budget > 80L?', sample_df, schema)
-        assert res.success is True
-        assert len(res.table_result) == 0
+    def test_two_step_filter_sort(self, engine, schema):
+        """Filter by location, then sort by budget descending."""
+        steps = [{'operation': 'filter', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}, {'operation': 'sort', 'column': schema.primary_budget_col, 'ascending': False}]
+        result = engine.execute_chain([SingleIntentModel.model_validate(s) for s in steps])
+        assert result.success
+        assert len(result.table_result) == 3
+        vals = result.table_result[schema.primary_budget_col].dropna().tolist()
+        assert vals == sorted(vals, reverse=True)
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_empty_result_handling(self, mock_gen, sample_df, schema):
-        mock_gen.return_value = "df[df['Customer Name'] == 'Nobody']"
-        res = run_dynamic_query('show nobody', sample_df, schema)
-        assert res.success is True
-        assert len(res.table_result) == 0
+    def test_three_step_filter_sort_topn(self, engine, schema):
+        """Filter -> sort -> top 2."""
+        steps = [{'operation': 'filter', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}, {'operation': 'sort', 'column': schema.primary_budget_col, 'ascending': False}, {'operation': 'topn', 'column': schema.primary_budget_col, 'n': 2}]
+        result = engine.execute_chain([SingleIntentModel.model_validate(s) for s in steps])
+        assert result.success
+        assert len(result.table_result) == 2
+        names = result.table_result['Customer Name'].tolist()
+        assert 'Bob' in names
+        assert 'Diana' in names
 
-    @patch('gemini_helper.generate_pandas_code')
-    def test_markdown_fence_stripping(self, mock_gen, sample_df, schema):
-        mock_gen.return_value = '```python\ndf\n```'
-        res = run_dynamic_query('test', sample_df, schema, max_retries=0)
-        assert res.success is False
+    def test_chain_empty_intermediate(self, engine, schema):
+        """Filter that produces zero rows -> sort should return empty gracefully."""
+        steps = [{'operation': 'filter', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Narnia'}]}, {'operation': 'sort', 'column': schema.primary_budget_col, 'ascending': False}]
+        result = engine.execute_chain([SingleIntentModel.model_validate(s) for s in steps])
+        assert result.success
+        assert result.table_result is not None
+        assert len(result.table_result) == 0
+
+    def test_chain_nonexistent_column_step2(self, engine):
+        """Step 2 references a non-existent column -> graceful error."""
+        steps = [{'operation': 'filter', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}, {'operation': 'sort', 'column': 'NonExistentColumn', 'ascending': False}]
+        result = engine.execute_chain([SingleIntentModel.model_validate(s) for s in steps])
+        assert result.success or result.error is not None
+        assert not isinstance(result, type(None))
+
+    def test_chain_single_step_identical(self, engine, schema):
+        """A single-step chain produces identical output to direct execute()."""
+        intent = {'operation': 'count', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}
+        direct = engine.execute(RootIntentModel.model_validate(intent))
+        chained = engine.execute_chain([SingleIntentModel.model_validate(s) for s in [intent]])
+        assert direct.scalar_result == chained.scalar_result
+        assert direct.operation == chained.operation
+
+    def test_chain_step_trace_populated(self, engine, schema):
+        """Verify step_trace has correct length and fields."""
+        steps = [{'operation': 'filter', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}, {'operation': 'sort', 'column': schema.primary_budget_col, 'ascending': False}]
+        result = engine.execute_chain([SingleIntentModel.model_validate(s) for s in steps])
+        assert len(result.step_trace) == 2
+        assert result.step_trace[0].operation == 'filter'
+        assert result.step_trace[1].operation == 'sort'
+        assert result.step_trace[0].rows_before == 5
+        assert result.step_trace[0].rows_after == 3
+        assert result.step_trace[1].rows_before == 3
+
+class TestValidateChainIntent:
+    """Tests for validate_chain_intent()."""
+
+    def test_max_steps_exceeded(self):
+        """Chain with > MAX_QUERY_STEPS should be rejected."""
+        too_many = {'steps': [{'operation': 'count'}] * (MAX_QUERY_STEPS + 1)}
+        with pytest.raises(ValueError, match='Too many steps'):
+            validate_chain_intent(too_many)
+
+    def test_invalid_step_operation(self):
+        bad = {'steps': [{'operation': 'nonexistent'}]}
+        with pytest.raises(ValueError, match='[Ii]nvalid operation'):
+            validate_chain_intent(bad)
+
+class TestRuleBasedChain:
+
+    def test_then_sort(self, schema, sample_df):
+        """'show pune customers then sort by budget' -> multi-step."""
+        intent = rule_based_intent('show pune customers then sort by budget', schema, sample_df)
+        assert intent.steps is not None
+        assert len(intent.steps) == 2
+
+    def test_then_top(self, schema, sample_df):
+        """'show pune customers then top 5' -> multi-step."""
+        intent = rule_based_intent('show pune customers then top 5', schema, sample_df)
+        assert intent.steps is not None
+        assert len(intent.steps) == 2
+        assert intent.steps[1].operation == 'topn'
+
+    def test_no_chain_single_op(self, schema, sample_df):
+        """'what is the average budget' -> single intent (no steps)."""
+        intent = rule_based_intent('what is the average budget', schema, sample_df)
+        assert 'steps' not in intent
+        assert intent.operation == 'average'
+
+class TestSingleOpRegression:
+
+    def test_count_with_filter_unchanged(self, engine):
+        """Verify count+filter produces IDENTICAL output after chaining changes."""
+        result = engine.execute(RootIntentModel.model_validate({'operation': 'count', 'conditions': [{'column': 'Preferred Location', 'op': 'eq', 'value': 'Pune'}]}))
+        assert result.success
+        assert result.scalar_result == 3
+        assert result.step_trace == []
+        assert result.rows_scanned == 5
+        assert result.filters_applied == 1
+
+
+class TestNoneColumnResolution:
+    """Phase 6.1: Edge cases where _numeric_col or _resolve returns None."""
+
+    @pytest.fixture
+    def empty_schema_engine(self):
+        """Engine with a dataframe that has no numeric or categorical columns."""
+        df = pd.DataFrame({'JustStrings': ['a', 'b', 'c']})
+        schema = DatasetSchema(
+            name_col=None, primary_budget_col=None, location_col=None,
+            property_type_col=None, status_col=None, date_cols=[], contact_col=None, id_cols=[]
+        )
+        return QueryEngine(df, schema)
+
+    def test_op_extremum_none_column(self, empty_schema_engine):
+        """_op_min with no numeric columns should fail gracefully."""
+        intent = RootIntentModel.model_validate({'operation': 'min'})
+        result = empty_schema_engine.execute(intent)
+        assert not result.success
+        assert "no numeric column found" in result.error.lower()
+
+    def test_op_sort_none_column(self, empty_schema_engine):
+        """_op_sort with no column could be determined should fail gracefully."""
+        intent = RootIntentModel.model_validate({'operation': 'sort'})
+        result = empty_schema_engine.execute(intent)
+        assert not result.success
+        assert "no column could be determined" in result.error.lower()
+
+    def test_op_groupby_none_column(self, empty_schema_engine):
+        """_op_groupby with no categorical columns should fail gracefully."""
+        intent = RootIntentModel.model_validate({'operation': 'groupby', 'agg_func': 'count'})
+        result = empty_schema_engine.execute(intent)
+        assert not result.success
+        assert "could not determine a column to group by" in result.error.lower()
+
+class TestIntentNormalization:
+    """Verify that operations natively ignoring intent.column/value normalize them into conditions."""
+    def test_count_normalization(self, engine):
+        intent = RootIntentModel.model_validate({
+            "operation": "count",
+            "column": "property_type",
+            "value": "2 BHK"
+        })
+        result = engine.execute(intent)
+        assert result.success
+        assert result.scalar_result == 2  # 2 2 BHKs in the sample data
+
+    def test_filter_normalization(self, engine):
+        intent = RootIntentModel.model_validate({
+            "operation": "filter",
+            "column": "location",
+            "value": "Pune"
+        })
+        result = engine.execute(intent)
+        assert result.success
+        assert result.scalar_result == 3  # 3 in pune
+
+    def test_groupby_normalization(self, engine):
+        intent = RootIntentModel.model_validate({
+            "operation": "groupby",
+            "column": "property_type",
+            "value": "2 BHK",
+            "group_by": "status",
+            "agg_func": "count"
+        })
+        result = engine.execute(intent)
+        assert result.success
+        # Should only group the 2 '2 BHK's
+        assert result.table_result["count"].sum() == 2

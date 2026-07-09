@@ -99,7 +99,6 @@ def _matches_any(col_name: str, keywords: list[str]) -> bool:
     Uses \b prefix to ensure we don't match inside a word (e.g. 'paid' -> 'id').
     It allows prefix matching like 'ref' to 'reference' or 'Ref #'.
     """
-    import re
     for kw in keywords:
         pattern = r"\b" + re.escape(kw.lower())
         if re.search(pattern, col_name, re.IGNORECASE):
@@ -157,6 +156,34 @@ def load_dataframe(file) -> pd.DataFrame:
 
     # Normalize column names: strip whitespace
     df.columns = [str(c).strip() for c in df.columns]
+
+    # Deduplicate column names — Excel exports sometimes produce duplicate
+    # headers (e.g. two "Status" columns). Pandas automatically mangles them 
+    # to "Status.1", "Status.2". We normalize this to "Status_1", "Status_2"
+    # for cleaner UI presentation and to prevent dot-notation issues.
+    import re
+    new_cols: list[str] = []
+    
+    # First pass: identify base names that have duplicates
+    base_counts = {}
+    for col in df.columns:
+        base = re.sub(r'\.\d+$', '', col)
+        base_counts[base] = base_counts.get(base, 0) + 1
+        
+    # Second pass: rename
+    seen_bases = {}
+    for col in df.columns:
+        base = re.sub(r'\.\d+$', '', col)
+        if base_counts.get(base, 1) > 1:
+            seen_bases[base] = seen_bases.get(base, 0) + 1
+            deduped = f"{base}_{seen_bases[base]}"
+            if col != deduped:
+                logger.warning("Duplicate column '%s' renamed to '%s'", col, deduped)
+            new_cols.append(deduped)
+        else:
+            new_cols.append(col)
+            
+    df.columns = new_cols
 
     logger.info(
         "Loaded dataset: %d rows × %d cols (%s)",

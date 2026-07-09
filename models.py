@@ -18,6 +18,17 @@ class ConditionModel(BaseModel):
     value: Any | None = None
     value2: Any | None = None
 
+    @field_validator("op")
+    @classmethod
+    def check_op(cls, v: str | None) -> str | None:
+        if v:
+            val = v.lower().strip()
+            allowed = {"eq", "neq", "gt", "gte", "lt", "lte", "between", "contains", "like", "isna", "notna", "==", ">", ">=", "<", "<="}
+            if val not in allowed:
+                raise ValueError(f"Invalid condition op '{val}'. Allowed: {sorted(allowed)}")
+            return val
+        return v
+
 class SingleIntentModel(BaseModel):
     operation: str | None = None
     column: str | None = None
